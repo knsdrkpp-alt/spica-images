@@ -395,4 +395,77 @@ describe('App', () => {
     expect(root.textContent).toContain('録音が中断されました');
     expect(root.textContent).toContain('最初にもどる');
   });
+
+  it('result notices: none for a clean set; processing-on and borderline noise each add one neutral notice', async () => {
+    let rec = fakeRecorder(fullSet());
+    let { root } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).not.toContain('端末の音声処理が有効だった');
+    expect(root.textContent).not.toContain('周囲の音がやや大きめ');
+
+    // empty pre-roll = unknown SNR -> the gate accepts with a 'noise-borderline' warning
+    rec = fakeRecorder([goodVowel, () => ({ ...goodSentence(), preRoll: new Float32Array(0) })]);
+    rec.processingOn = true;
+    ({ root } = setup(rec));
+    click(root, '声を録音する');
+    await flush();
+    expect(headline(root)).toContain('参考');
+    const notices = [...root.querySelectorAll('.notice')].map((n) => n.textContent);
+    expect(notices).toContain('端末の音声処理が有効だったため、目安としての確かさが下がっています。');
+    expect(notices).toContain('周囲の音がやや大きめでした。静かな場所だと、より確かな目安になります。');
+  });
+
+  it('a warning from an earlier set still shows after later clean sets; より安定した結果 from set 2', async () => {
+    const rec = fakeRecorder([goodVowel, () => ({ ...goodSentence(), preRoll: new Float32Array(0) }), ...fullSet()]);
+    const { root } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).not.toContain('より安定した結果');
+    click(root, 'もう1セット');
+    await flush();
+    expect(root.textContent).toContain('周囲の音がやや大きめでした');
+    expect(root.textContent).toContain('より安定した結果');
+  });
+
+  it('shows the measured pitch (Hz + note) and vowel stability, but no speaking speed', async () => {
+    const rec = fakeRecorder(fullSet());
+    const { root } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    const m = root.querySelector('.measures')!;
+    expect(m.textContent).toMatch(/声の高さ:約 \d+ Hz\(音名 [A-G]#?\d\)/);
+    expect(m.textContent).toMatch(/声の安定:約 ±\d+ セント/);
+    const hz = Number(/約 (\d+) Hz/.exec(m.textContent!)![1]);
+    expect(hz).toBeGreaterThan(170);
+    expect(hz).toBeLessThan(230);
+    expect(m.textContent).not.toMatch(/スピード|速さ/);
+  });
+
+  it('the dominant band in よく出ている点 comes from the averaged band shares the charts show', async () => {
+    // set 1: low tone (strongest band low); set 2: high tone -> the mean decides, not the last set
+    const lowSentence = (): Rec => {
+      const parts: Float32Array[] = [];
+      for (let i = 0; i < 20; i++) {
+        parts.push(harmonicTone({ f0: 120, seconds: 0.3, sampleRate: SR, harmonics: 3 }));
+        parts.push(silence(0.08, SR));
+      }
+      return { preRoll: silence(0.5, SR), samples: concat(parts) };
+    };
+    const rec = fakeRecorder([goodVowel, lowSentence, goodVowel, lowSentence, goodVowel, goodSentence]);
+    const { root } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    click(root, 'もう1セット');
+    await flush();
+    click(root, 'もう1セット');
+    await flush();
+    const bars = [...root.querySelectorAll('svg.chart-bar rect.bar')].map((r) => Number(r.getAttribute('height')));
+    expect(bars).toHaveLength(12);
+    const top = bars.indexOf(Math.max(...bars));
+    const strengths = [...root.querySelectorAll('section')].find((x) => x.textContent?.includes('よく出ている点'))!;
+    const m = /約(\d+)〜(\d+) Hz/.exec(strengths.textContent!)!;
+    const legend = [...root.querySelectorAll('.legend-item')][top].textContent!;
+    expect(legend).toContain(`${m[1]}〜${m[2]} Hz`);
+  });
 });

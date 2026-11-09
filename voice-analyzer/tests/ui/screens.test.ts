@@ -5,7 +5,9 @@ import {
 } from '../../src/ui/screens';
 import { BAND_NOTES } from '../../src/ui/band-notes';
 import { findBannedWords, type Feedback } from '../../src/diagnosis/feedback';
-import { FIXED_FOOTER, STOP_NOTICE } from '../../src/diagnosis/copy';
+import {
+  FIXED_FOOTER, MULTI_SET_NOTE, NOTICE_NOISE, NOTICE_PROCESSING, PRACTICE_CADENCE, STOP_NOTICE,
+} from '../../src/diagnosis/copy';
 import { READING_TEXT } from '../../src/diagnosis/config';
 import type { MicError } from '../../src/audio/capture';
 import type { GateReason } from '../../src/diagnosis/gate';
@@ -20,6 +22,8 @@ const fb: Feedback = {
 };
 const share = new Array(12).fill(1 / 12);
 const noop = () => {};
+const NO_MEASURES = { f0Hz: null, f0Note: null, stabilityCent: null };
+const MEASURES = { f0Hz: 219.6, f0Note: 'A3', stabilityCent: 23 };
 const MIC: MicError[] = ['denied', 'no-device', 'insecure-context', 'unsupported'];
 const REASONS: (GateReason | 'interrupted')[] = [
   'too-noisy', 'clipping', 'too-quiet', 'no-voice', 'vowel-too-short', 'vowel-unstable', 'sentence-too-short', 'interrupted',
@@ -27,7 +31,7 @@ const REASONS: (GateReason | 'interrupted')[] = [
 const count = (s: string, sub: string) => s.split(sub).length - 1;
 type ResultOpts = Parameters<typeof renderResult>[2];
 const result = (o: Partial<ResultOpts> = {}) =>
-  renderResult(fb, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, ...o });
+  renderResult(fb, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES, ...o });
 const buttonByText = (el: HTMLElement, t: string) =>
   Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes(t));
 
@@ -44,7 +48,7 @@ describe('renderResult', () => {
     expect(el.textContent).toContain('グラフの読み方');
   });
   it('keeps STOP_NOTICE and footer exactly once even without practice steps', () => {
-    const el = renderResult({ ...fb, practice: [] }, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop });
+    const el = renderResult({ ...fb, practice: [] }, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES });
     expect(count(el.textContent!, STOP_NOTICE)).toBe(1);
     expect(count(el.textContent!, FIXED_FOOTER)).toBe(1);
     expect(el.lastElementChild!.tagName).toBe('FOOTER');
@@ -68,6 +72,45 @@ describe('renderResult', () => {
       buttonByText(result({ canRecordMore: more, onHome }), '最初にもどる')!.click();
       expect(onHome).toHaveBeenCalledTimes(1);
     }
+  });
+  it('shows the より安定した結果 line only from the 2nd set on', () => {
+    expect(result().textContent).not.toContain(MULTI_SET_NOTE);
+    for (const sets of [2, 3]) {
+      expect(count(renderResult({ ...fb, sets }, share, {
+        provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES,
+      }).textContent!, MULTI_SET_NOTE)).toBe(1);
+    }
+    expect(MULTI_SET_NOTE).toContain('より安定した結果');
+  });
+  it('renders each notice once in the neutral .notice style', () => {
+    const el = result({ notices: [NOTICE_PROCESSING, NOTICE_NOISE] });
+    for (const n of [NOTICE_PROCESSING, NOTICE_NOISE]) {
+      const hits = Array.from(el.querySelectorAll('.notice')).filter((e) => e.textContent === n);
+      expect(hits).toHaveLength(1);
+    }
+    expect(result().textContent).not.toContain(NOTICE_PROCESSING);
+    expect(result().textContent).not.toContain(NOTICE_NOISE);
+  });
+  it('shows the measured values, hedged, and leaves out null ones', () => {
+    const el = result({ measures: MEASURES });
+    const sec = el.querySelector('.measures')!;
+    expect(sec.querySelector('h3')!.textContent).toBe('測った値');
+    expect(sec.textContent).toContain('声の高さ:約 220 Hz(音名 A3)');
+    expect(sec.textContent).toContain('声の安定:約 ±23 セント');
+    expect(sec.textContent).toContain('目安');
+    expect(sec.textContent).not.toMatch(/速さ|スピード|モーラ/);
+    const onlyPitch = result({ measures: { f0Hz: 100, f0Note: 'G2', stabilityCent: null } }).querySelector('.measures')!;
+    expect(onlyPitch.textContent).toContain('約 100 Hz(音名 G2)');
+    expect(onlyPitch.querySelector('ul')!.textContent).not.toContain('声の安定');
+    const onlyStab = result({ measures: { f0Hz: null, f0Note: null, stabilityCent: 8 } }).querySelector('.measures')!;
+    expect(onlyStab.querySelector('ul')!.textContent).not.toContain('声の高さ');
+    expect(onlyStab.textContent).toContain('約 ±8 セント');
+    expect(result().querySelector('.measures')).toBeNull();
+  });
+  it('practice section ends with the practice cadence line', () => {
+    const el = result();
+    expect(count(el.textContent!, PRACTICE_CADENCE)).toBe(1);
+    expect(PRACTICE_CADENCE).toBe('週3〜5日、2〜4週ほど続けてから、もう一度チェックしてみてください。');
   });
   it('legend buttons toggle band notes', () => {
     const el = result();
@@ -312,8 +355,14 @@ describe('banned-word lint over all screens', () => {
     }
     for (const prov of [true, false]) for (const more of [true, false]) els.push(result({ provisionalNorms: prov, canRecordMore: more }));
     els.push(renderResult({ ...fb, sets: 3, strengths: [], focus: [], practice: [] }, new Array(12).fill(0), {
-      provisionalNorms: false, canRecordMore: false, onAgain: noop, onHome: noop,
+      provisionalNorms: false, canRecordMore: false, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES,
     }));
+    for (const sets of [1, 2, 3]) {
+      els.push(renderResult({ ...fb, sets }, share, {
+        provisionalNorms: true, canRecordMore: sets < 3, onAgain: noop, onHome: noop,
+        notices: [NOTICE_PROCESSING, NOTICE_NOISE], measures: MEASURES,
+      }));
+    }
     for (const e of MIC) els.push(renderMicError(e, noop));
     for (const r of REASONS) els.push(renderRetry(r, noop, noop));
     for (const el of els) {

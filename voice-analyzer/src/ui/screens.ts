@@ -1,5 +1,5 @@
 import { BAND_COLORS, BAND_EDGES_HZ, READING_TEXT } from '../diagnosis/config';
-import { FIXED_FOOTER, STOP_NOTICE } from '../diagnosis/copy';
+import { FIXED_FOOTER, MULTI_SET_NOTE, PRACTICE_CADENCE, STOP_NOTICE } from '../diagnosis/copy';
 import type { Feedback } from '../diagnosis/feedback';
 import type { GateReason } from '../diagnosis/gate';
 import type { MicError } from '../audio/capture';
@@ -193,11 +193,41 @@ export function renderRecording(onStop: () => void): RecordingView {
 
 const hzRange = (i: number) => `${BAND_EDGES_HZ[i]}〜${BAND_EDGES_HZ[i + 1]} Hz`;
 
-export function renderResult(
-  f: Feedback,
-  bandShare: number[],
-  opts: { provisionalNorms: boolean; onAgain: () => void; canRecordMore: boolean; onHome: () => void },
-): HTMLElement {
+/** Measured values shown on the result screen; a null value is left out. */
+export interface Measures {
+  f0Hz: number | null;
+  f0Note: string | null;
+  stabilityCent: number | null;
+}
+
+export interface ResultOptions {
+  provisionalNorms: boolean;
+  canRecordMore: boolean;
+  onAgain: () => void;
+  onHome: () => void;
+  /** Neutral notices (processing on, borderline noise), one element each. */
+  notices: string[];
+  measures: Measures;
+}
+
+function renderMeasures(m: Measures): HTMLElement | null {
+  const items: string[] = [];
+  if (m.f0Hz !== null && Number.isFinite(m.f0Hz)) {
+    const note = m.f0Note ? `(音名 ${m.f0Note})` : '';
+    items.push(`声の高さ:約 ${Math.round(m.f0Hz)} Hz${note}`);
+  }
+  if (m.stabilityCent !== null && Number.isFinite(m.stabilityCent)) {
+    items.push(`声の安定:約 ±${Math.round(m.stabilityCent)} セント`);
+  }
+  if (!items.length) return null;
+  return h('section', { class: 'measures' },
+    h('h3', {}, '測った値'),
+    list(items),
+    h('p', { class: 'note' }, '声の高さは読み上げ、声の安定は「あー」の高さの揺れ(セントは半音の100分の1)から求めた目安です。録音した環境や機種によって変わります。'),
+  );
+}
+
+export function renderResult(f: Feedback, bandShare: number[], opts: ResultOptions): HTMLElement {
   const note = h('p', { class: 'band-note', role: 'status' });
   let open = -1;
   const legendButtons = BAND_COLORS.map((color, i) => {
@@ -217,9 +247,11 @@ export function renderResult(
     h('h2', { class: 'headline' }, f.headline),
     h('p', {}, f.tendency),
   );
+  if (f.sets >= 2) root.append(h('p', { class: 'note' }, MULTI_SET_NOTE));
   if (opts.provisionalNorms) {
     root.append(h('p', { class: 'notice' }, 'いまは仮の基準を使っているため、今後の調整で表示が変わることがあります。'));
   }
+  for (const n of opts.notices) root.append(h('p', { class: 'notice' }, n));
   root.append(
     h('section', { class: 'charts' },
       renderBarChart(bandShare),
@@ -236,6 +268,8 @@ export function renderResult(
       note,
     ),
   );
+  const measures = renderMeasures(opts.measures);
+  if (measures) root.append(measures);
   if (f.strengths.length) root.append(h('section', {}, h('h3', {}, 'よく出ている点'), list(f.strengths)));
   if (f.focus.length) root.append(h('section', {}, h('h3', {}, '意識してみるとよい点'), list(f.focus)));
   if (f.practice.length) {
@@ -243,6 +277,7 @@ export function renderResult(
       h('h3', {}, '練習のヒント'),
       h('ol', {}, ...f.practice.map((p) =>
         h('li', {}, h('strong', {}, `${p.title}(${p.minutes}分)`), h('p', {}, p.how)))),
+      h('p', {}, PRACTICE_CADENCE),
     ));
   }
   root.append(h('p', { class: 'notice' }, STOP_NOTICE));

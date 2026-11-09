@@ -91,6 +91,9 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await expect(page.locator('svg.chart-bar rect.bar')).toHaveCount(12);
   await expect(page.locator('svg.chart-pie path')).toHaveCount(12);
   await expect(page.getByText('医療機関(耳鼻咽喉科)に相談してください')).toBeVisible();
+  await expect(page.getByText('測った値')).toBeVisible();
+  await expect(page.getByText(/声の高さ:約 \d+ Hz/)).toBeVisible();
+  await expect(page.getByText('週3〜5日、2〜4週ほど続けてから')).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
   await page.screenshot({ path: '/tmp/voice-analyzer-result.png', fullPage: true });
 
@@ -108,6 +111,7 @@ test('three sets drop the 参考 label and the extra-set button', async ({ page 
     await expect(page.locator('h2.headline')).toBeVisible({ timeout: 30_000 });
   }
   expect(await mic(page)).toEqual({ opens: 3, stops: 3 });
+  await expect(page.getByText('より安定した結果')).toBeVisible();
   await expect(page.locator('h2.headline')).not.toContainText('参考');
   await expect(page.getByRole('button', { name: 'もう1セット録音する' })).toHaveCount(0);
   await page.getByRole('button', { name: '最初にもどる' }).click();

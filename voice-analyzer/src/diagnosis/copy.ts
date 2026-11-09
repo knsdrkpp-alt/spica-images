@@ -80,3 +80,13 @@ export const FOCUS_STEP: Record<keyof typeof FOCUS, { title: string; how: string
     how: `読み上げ文を、いつもの速さから10〜20%以内でゆっくり、または少し速めにして読みます。区切りの位置で軽く息を入れます。${SAFE}`,
   },
 };
+
+/** Result screen: shown from the 2nd accepted set on. */
+export const MULTI_SET_NOTE = '複数回の録音の中央値をもとにした、より安定した結果です。';
+
+/** Result screen notices (neutral styling), from the gate's per-set flags/warnings. */
+export const NOTICE_PROCESSING = '端末の音声処理が有効だったため、目安としての確かさが下がっています。';
+export const NOTICE_NOISE = '周囲の音がやや大きめでした。静かな場所だと、より確かな目安になります。';
+
+/** Spec §5.4 practice cadence. */
+export const PRACTICE_CADENCE = '週3〜5日、2〜4週ほど続けてから、もう一度チェックしてみてください。';

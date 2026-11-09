@@ -2,10 +2,12 @@ import type { MicError, Recorder } from './audio/capture';
 import { classify, medianProfile } from './diagnosis/classify';
 import { buildFeedback } from './diagnosis/feedback';
 import { checkGate } from './diagnosis/gate';
-import type { GateReason } from './diagnosis/gate';
+import type { GateReason, GateWarning } from './diagnosis/gate';
+import { NOTICE_NOISE, NOTICE_PROCESSING } from './diagnosis/copy';
 import { toProfile } from './diagnosis/profile';
 import type { Norms } from './diagnosis/profile';
 import { extractSentence, extractVowel } from './dsp/features';
+import { hzToNoteName } from './dsp/note';
 import type { SetFeatures, Sex } from './types';
 import {
   renderMicError, renderRecording, renderResult, renderRetry, renderStart,
@@ -48,11 +50,20 @@ function meanBandShare(sets: SetFeatures[]): number[] {
   return total > 0 ? acc.map((v) => v / total) : acc.map(() => 0);
 }
 
+function median(xs: Array<number | null>): number | null {
+  const v = xs.filter((x): x is number => x !== null && Number.isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
 export class App {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly yieldToPaint: () => Promise<void>;
   private recorder: Recorder | null = null;
   private sets: SetFeatures[] = [];
+  /** Gate warnings of each accepted set (parallel to `sets`). */
+  private warnings: GateWarning[][] = [];
   private sex: Sex = 'unspecified';
   /** Bumped whenever a set is started, abandoned, or the app returns to start. */
   private token = 0;
@@ -68,6 +79,7 @@ export class App {
     this.token++;
     this.releaseRecorder();
     this.sets = [];
+    this.warnings = [];
     this.show(renderStart((sex) => this.begin(sex)));
   }
 
@@ -201,15 +213,20 @@ export class App {
       const vowel = extractVowel(vowelRec.samples, sr);
       const sentence = extractSentence(sentenceRec.samples, sr);
       const gates: GateReason[] = [];
-      const gv = checkGate({ samples: vowelRec.samples, sampleRate: sr, preRoll: vowelRec.preRoll, task: 'vowel', features: vowel, processingOn });
-      if (!gv.ok) gates.push(gv.reason);
-      const gs = checkGate({ samples: sentenceRec.samples, sampleRate: sr, preRoll: sentenceRec.preRoll, task: 'sentence', features: sentence, processingOn });
-      if (!gs.ok) gates.push(gs.reason);
+      const warnings: GateWarning[] = [];
+      for (const g of [
+        checkGate({ samples: vowelRec.samples, sampleRate: sr, preRoll: vowelRec.preRoll, task: 'vowel', features: vowel, processingOn }),
+        checkGate({ samples: sentenceRec.samples, sampleRate: sr, preRoll: sentenceRec.preRoll, task: 'sentence', features: sentence, processingOn }),
+      ]) {
+        if (g.ok) warnings.push(...g.warnings);
+        else gates.push(g.reason);
+      }
       if (gates.length) {
         this.show(renderRetry(gates[0], retry, this.home));
         return;
       }
       this.sets.push({ vowel, sentence, flags: { processingOn } });
+      this.warnings.push(warnings);
       this.showResult();
     } catch {
       if (token === this.token) this.fail();
@@ -220,12 +237,27 @@ export class App {
     const { sets, deps } = this;
     const profiles = sets.map((s) => toProfile(s, this.sex, deps.norms));
     const c = classify(profiles);
-    const f = buildFeedback(c, medianProfile(profiles), sets[sets.length - 1], sets.length);
-    this.show(renderResult(f, meanBandShare(sets), {
+    const bandShare = meanBandShare(sets);
+    // Describe the dominant band from the same averaged shares the charts show (stored set untouched).
+    const last = sets[sets.length - 1];
+    const lastWithMean: SetFeatures = { ...last, sentence: { ...last.sentence, bandShare } };
+    const f = buildFeedback(c, medianProfile(profiles), lastWithMean, sets.length);
+    const notices: string[] = [];
+    if (sets.some((s) => s.flags.processingOn)) notices.push(NOTICE_PROCESSING);
+    if (this.warnings.some((w) => w.includes('noise-borderline'))) notices.push(NOTICE_NOISE);
+    const f0Hz = median(sets.map((s) => s.sentence.f0MedianHz));
+    const stabilitySt = median(sets.map((s) => s.vowel.f0StabilitySt));
+    this.show(renderResult(f, bandShare, {
       provisionalNorms: deps.norms.provisional,
       canRecordMore: sets.length < MAX_SETS,
       onAgain: () => this.openAndRun(),
       onHome: this.home,
+      notices,
+      measures: {
+        f0Hz,
+        f0Note: f0Hz === null ? null : hzToNoteName(f0Hz),
+        stabilityCent: stabilitySt === null ? null : Math.round(stabilitySt * 100),
+      },
     }));
   }
 }
