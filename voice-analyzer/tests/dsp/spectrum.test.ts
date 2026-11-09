@@ -27,11 +27,11 @@ describe('fft', () => {
 });
 
 describe('spectrumFrameLayout', () => {
-  it('uses ~40 ms power-of-two frames with 50% hop', () => {
-    expect(spectrumFrameLayout(16000)).toEqual({ frameLength: 1024, hop: 512 });
-    expect(spectrumFrameLayout(44100)).toEqual({ frameLength: 2048, hop: 1024 });
-    expect(spectrumFrameLayout(48000)).toEqual({ frameLength: 2048, hop: 1024 });
-    expect(spectrumFrameLayout(8000).frameLength).toBe(512);
+  it('uses 64 ms+ power-of-two frames with 50% hop', () => {
+    expect(spectrumFrameLayout(16000)).toEqual({ frameLength: 2048, hop: 1024 });
+    expect(spectrumFrameLayout(44100)).toEqual({ frameLength: 4096, hop: 2048 });
+    expect(spectrumFrameLayout(48000)).toEqual({ frameLength: 4096, hop: 2048 });
+    expect(spectrumFrameLayout(8000).frameLength).toBe(1024);
   });
 });
 
@@ -112,9 +112,18 @@ describe('spectrum', () => {
     expect(Number.isFinite(alphaRatioDb(s))).toBe(true);
     expect(spectralCentroidHz(s)).toBe(0);
     const short = longTermSpectrum(new Float32Array(100).fill(0.1), sr);
-    expect(short.power.length).toBe(513);
+    expect(short.power.length).toBe(spectrumFrameLayout(sr).frameLength / 2 + 1);
     const none = longTermSpectrum(harmonicTone({ f0: 200, seconds: 0.5, sampleRate: sr }), sr, [false]);
     expect(none.power.every((v) => v === 0)).toBe(true);
+  });
+
+  it('apportions a tone on a band edge evenly between the two bands', () => {
+    const sr = 16000;
+    const x = harmonicTone({ f0: 208, seconds: 2, sampleRate: sr, harmonics: 1 });
+    const shares = bandShares(longTermSpectrum(x, sr));
+    expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
+    expect(Math.abs(shares[1] - shares[2])).toBeLessThan(0.1);
+    expect(shares[1] + shares[2]).toBeGreaterThan(0.9);
   });
 
   it('zeros bands above Nyquist and renormalizes', () => {

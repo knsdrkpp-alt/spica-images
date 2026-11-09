@@ -67,6 +67,28 @@ describe('extractVowel', () => {
     expectNoNaN(extractVowel(harmonicTone({ f0: 200, seconds: 0.05, sampleRate: 16000 }), 16000));
   });
 
+  it('excludes the first and last 0.75 s from analysis', () => {
+    const sr = 16000;
+    const x = concat([
+      harmonicTone({ f0: 200, seconds: 0.75, sampleRate: sr }),
+      harmonicTone({ f0: 300, seconds: 2.5, sampleRate: sr }),
+      harmonicTone({ f0: 200, seconds: 0.75, sampleRate: sr }),
+    ]);
+    const f = extractVowel(x, sr);
+    expect(Math.abs((f.f0MedianHz as number) - 300)).toBeLessThanOrEqual(2);
+    expect(f.voicedSeconds).toBeLessThan(2.6);
+  });
+
+  it('f0RangeSt spans a two-pitch signal', () => {
+    const sr = 16000;
+    const x = concat([
+      harmonicTone({ f0: 150, seconds: 2.5, sampleRate: sr }),
+      harmonicTone({ f0: 300, seconds: 2.5, sampleRate: sr }),
+    ]);
+    const f = extractVowel(x, sr);
+    expect(Math.abs((f.f0RangeSt as number) - 12)).toBeLessThan(1.5);
+  });
+
   it('uses the whole signal when too short to trim', () => {
     const f = extractVowel(harmonicTone({ f0: 200, seconds: 2, sampleRate: 16000 }), 16000);
     expect(f.voicedSeconds).toBeGreaterThan(1);
@@ -79,6 +101,13 @@ describe('extractVowel', () => {
     for (const sr of rates) {
       const r = extractVowel(tone(200, sr), sr);
       expect(Math.abs((r.f0MedianHz as number) - 200)).toBeLessThanOrEqual(2);
+    }
+    // 200 Hz: same dominant band and similar top-two shares across rates
+    const top = rates.map((sr) => extractVowel(tone(200, sr), sr).bandShare);
+    expect(new Set(top.map(argmax)).size).toBe(1);
+    for (const k of [1, 2]) {
+      const v = top.map((b) => b[k]);
+      expect(Math.max(...v) - Math.min(...v)).toBeLessThan(0.15);
     }
     // 200 Hz sits ~4% from the 208 Hz band edge, so its argmax legitimately depends on FFT bin
     // layout; use a tone mid-band (208-299 Hz) for the cross-rate band comparison.

@@ -8,15 +8,16 @@ export interface Spectrum {
 
 const EPS = 1e-12;
 
+/** Smallest power of two strictly greater than n. */
 function nextPow2(n: number): number {
   let p = 1;
-  while (p < n) p <<= 1;
+  while (p <= n) p <<= 1;
   return p;
 }
 
-/** ~40 ms power-of-two frames (min 512) with 50% overlap. */
+/** ~64-128 ms power-of-two frames (min 1024) with 50% overlap: 2048 @16 kHz, 4096 @44.1/48 kHz. */
 export function spectrumFrameLayout(sampleRate: number): { frameLength: number; hop: number } {
-  const frameLength = Math.max(512, nextPow2(Math.round(0.04 * sampleRate)));
+  const frameLength = Math.max(1024, nextPow2(Math.round(0.064 * sampleRate)));
   return { frameLength, hop: frameLength / 2 };
 }
 
@@ -63,6 +64,20 @@ export function longTermSpectrum(
   return { freqs, power };
 }
 
+/** Power of each bin apportioned to [lo, hi) by overlap of the bin's frequency interval. */
+function bandEnergyOverlap(spec: Spectrum, lo: number, hi: number): number {
+  const n = spec.freqs.length;
+  if (n < 2) return 0;
+  const half = (spec.freqs[1] - spec.freqs[0]) / 2;
+  let e = 0;
+  for (let k = 0; k < n; k++) {
+    const a = Math.max(lo, spec.freqs[k] - half);
+    const b = Math.min(hi, spec.freqs[k] + half);
+    if (b > a) e += (spec.power[k] * (b - a)) / (2 * half);
+  }
+  return e;
+}
+
 function bandEnergy(spec: Spectrum, lo: number, hi: number): number {
   let e = 0;
   for (let k = 0; k < spec.freqs.length; k++) {
@@ -78,7 +93,7 @@ export function bandShares(spec: Spectrum): number[] {
   const raw: number[] = [];
   for (let b = 0; b < BAND_EDGES_HZ.length - 1; b++) {
     const lo = BAND_EDGES_HZ[b];
-    raw.push(lo >= nyquist ? 0 : bandEnergy(spec, lo, BAND_EDGES_HZ[b + 1]));
+    raw.push(lo >= nyquist ? 0 : bandEnergyOverlap(spec, lo, BAND_EDGES_HZ[b + 1]));
   }
   const total = raw.reduce((a, b) => a + b, 0);
   if (!(total > 0)) return raw.map(() => 0);
