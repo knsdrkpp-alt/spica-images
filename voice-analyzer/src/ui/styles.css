@@ -70,7 +70,7 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
   font: inherit; font-size: 0.875rem; color: var(--fg); background: var(--bg);
   border: 1px solid var(--border); border-radius: 8px; cursor: pointer; text-align: left;
 }
-.legend-item[aria-expanded="true"] { border-color: var(--accent); background: var(--surface); }
+.legend-item[aria-expanded="true"] { border-color: var(--fg); background: var(--surface); }
 .swatch { flex: none; width: 18px; height: 18px; border-radius: 4px; }
 .band-note { min-height: 1.7em; }
 

@@ -72,6 +72,11 @@ describe('renderResult', () => {
     legend[3].click();
     expect(el.textContent).not.toContain(BAND_NOTES[3]);
   });
+  it('BAND_NOTES avoid impression, personality, ability and anatomy wording', () => {
+    for (const stem of ['印象', '性格', '能力', '存在感', 'あたたか', 'きらびやか', '空気感', '胸']) {
+      for (const n of BAND_NOTES) expect(n).not.toContain(stem);
+    }
+  });
   it('BAND_NOTES has 12 short notes', () => {
     expect(BAND_NOTES).toHaveLength(12);
     for (const n of BAND_NOTES) expect(n.length).toBeLessThan(60);
