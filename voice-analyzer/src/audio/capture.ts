@@ -3,6 +3,13 @@ import workletUrl from './recorder-worklet.ts?worker&url';
 export type MicError = 'denied' | 'no-device' | 'insecure-context' | 'unsupported';
 
 const PRE_ROLL_SECONDS = 0.5;
+/** No audio block for this long (during start or recording) counts as an interruption. */
+export const START_WATCHDOG_MS = 3000;
+
+export interface RecorderOptions {
+  /** Overrides START_WATCHDOG_MS (for tests). */
+  watchdogMs?: number;
+}
 
 type LevelCallback = (rms: number, wave: Float32Array) => void;
 
@@ -31,12 +38,15 @@ export class Recorder {
   private sampChunks: Float32Array[] = [];
   private sampLen = 0;
   private preRollWaiter: (() => void) | null = null;
+  private gen = 0;
+  private watchdog: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(
     private readonly ctx: AudioContext,
     private readonly stream: MediaStream,
     private readonly nodes: AudioNode[],
     processingOn: boolean,
+    private readonly watchdogMs: number,
   ) {
     this.sampleRate = ctx.sampleRate;
     this.processingOn = processingOn;
@@ -48,7 +58,7 @@ export class Recorder {
     }
   }
 
-  static async open(): Promise<Recorder | { error: MicError }> {
+  static async open(opts: RecorderOptions = {}): Promise<Recorder | { error: MicError }> {
     if (!window.isSecureContext) return { error: 'insecure-context' };
     const Ctor: typeof AudioContext | undefined =
       window.AudioContext ??
@@ -98,15 +108,15 @@ export class Recorder {
     const processingOn =
       s.echoCancellation === true || s.noiseSuppression === true || s.autoGainControl === true;
 
-    const source = ctx.createMediaStreamSource(stream);
-    const sink = ctx.createGain();
-    sink.gain.value = 0; // keep the graph pulled without audible output
-    sink.connect(ctx.destination);
-    const nodes: AudioNode[] = [source, sink];
-
+    const nodes: AudioNode[] = [];
     let recorder: Recorder | null = null;
     const feed = (b: Float32Array) => recorder?.handleBlock(b);
     try {
+      const source = ctx.createMediaStreamSource(stream);
+      const sink = ctx.createGain();
+      sink.gain.value = 0; // keep the graph pulled without audible output
+      sink.connect(ctx.destination);
+      nodes.push(source, sink);
       if (ctx.audioWorklet) {
         await ctx.audioWorklet.addModule(workletUrl);
         const node = new AudioWorkletNode(ctx, 'recorder-processor', {
@@ -134,31 +144,39 @@ export class Recorder {
       return { error: 'unsupported' };
     }
 
-    recorder = new Recorder(ctx, stream, nodes, processingOn);
+    recorder = new Recorder(ctx, stream, nodes, processingOn, opts.watchdogMs ?? START_WATCHDOG_MS);
     return recorder;
   }
 
+  /**
+   * Begins recording; resolves once the 0.5 s preRoll is collected, or early if the
+   * recording is stopped, discarded, released or interrupted (including by the
+   * no-audio watchdog). A second start() while one is active returns immediately
+   * without re-arming; so does start() after release().
+   */
   async start(onLevel: LevelCallback): Promise<void> {
-    if (this.released) return;
+    if (this.released || this.recording) return;
+    const gen = ++this.gen;
     this.resetBuffers();
     this.interrupted = false;
-    if (this.ctx.state !== 'running') {
-      try {
-        await this.ctx.resume();
-      } catch {
-        /* state check below */
-      }
-    }
     this.onLevel = onLevel;
     this.recording = true;
-    if (this.preRollTarget <= 0) return;
-    await new Promise<void>((resolve) => {
+    const done = new Promise<void>((resolve) => {
       this.preRollWaiter = resolve;
     });
+    this.armWatchdog();
+    if (this.ctx.state !== 'running') {
+      // resume() may reject or never settle: race it against `done` (watchdog/stop).
+      await Promise.race([this.ctx.resume().catch(() => {}), done]);
+    }
+    if (gen !== this.gen) return; // stopped/discarded/released/interrupted meanwhile
+    await done;
   }
 
   async stop(): Promise<{ samples: Float32Array; preRoll: Float32Array }> {
     this.recording = false;
+    this.gen++;
+    this.clearWatchdog();
     this.onLevel = null;
     this.flushWaiter();
     const out = this.interrupted
@@ -172,6 +190,8 @@ export class Recorder {
   /** Clears collected audio and cancels any recording; the mic stays open. */
   discard(): void {
     this.recording = false;
+    this.gen++;
+    this.clearWatchdog();
     this.onLevel = null;
     this.interrupted = false;
     this.resetBuffers();
@@ -195,6 +215,7 @@ export class Recorder {
 
   private handleBlock(block: Float32Array): void {
     if (!this.recording) return;
+    this.armWatchdog();
     let sum = 0;
     for (let i = 0; i < block.length; i++) sum += block[i] * block[i];
     const rms = block.length ? Math.sqrt(sum / block.length) : 0;
@@ -226,11 +247,23 @@ export class Recorder {
   private interrupt(): void {
     if (!this.recording) return;
     this.recording = false;
+    this.gen++;
+    this.clearWatchdog();
     this.onLevel = null;
     this.interrupted = true;
     this.resetBuffers();
     this.flushWaiter();
     this.onInterrupted?.();
+  }
+
+  private armWatchdog(): void {
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => this.interrupt(), this.watchdogMs);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdog !== null) clearTimeout(this.watchdog);
+    this.watchdog = null;
   }
 
   private resetBuffers(): void {

@@ -89,9 +89,13 @@ class MockCtx {
   createGain() {
     return new MockNode();
   }
-  createScriptProcessor() {
-    return new MockNode();
-  }
+  createScriptProcessor = vi.fn((..._a: number[]) => {
+    const n = new MockNode() as MockNode & { onaudioprocess: ((e: unknown) => void) | null };
+    n.onaudioprocess = null;
+    this.sp = n;
+    return n;
+  });
+  sp: (MockNode & { onaudioprocess: ((e: unknown) => void) | null }) | null = null;
 }
 
 let track: MockTrack;
@@ -128,8 +132,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function openOk(): Promise<Recorder> {
-  const r = await Recorder.open();
+async function openOk(opts?: { watchdogMs?: number }): Promise<Recorder> {
+  const r = await Recorder.open(opts);
   if ('error' in r) throw new Error('open failed: ' + r.error);
   return r;
 }
@@ -309,11 +313,20 @@ describe('recording', () => {
     expect(out.preRoll.length).toBe(0);
   });
 
-  it('falls back to ScriptProcessor when AudioWorklet is unavailable', async () => {
+  it('falls back to ScriptProcessor (2048) and feeds the same pipeline', async () => {
     withWorklet = false;
     const r = await openOk();
     expect(workletNodes.length).toBe(0);
-    expect(r.sampleRate).toBe(48000);
+    expect(ctxs[0].createScriptProcessor).toHaveBeenCalledWith(2048, 1, 1);
+    const p = r.start(() => {});
+    const b1 = block(2048, 0);
+    const ev = { inputBuffer: { getChannelData: () => b1 } };
+    for (let i = 0; i < 12; i++) ctxs[0].sp!.onaudioprocess!(ev); // 24576 >= 24000
+    await p;
+    const out = await r.stop();
+    expect(out.preRoll.length).toBe(24000);
+    expect(out.samples.length).toBe(24576 - 24000);
+    expect(out.preRoll[5]).toBe(b1[5]);
   });
 });
 
@@ -360,11 +373,9 @@ describe('interruption', () => {
     await r.stop();
     ctxs[0].resume.mockClear();
     const p = r.start(() => {});
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(ctxs[0].resume).toHaveBeenCalled());
     feed(24000);
     await p;
-    expect(ctxs[0].resume).toHaveBeenCalled();
     const out = await r.stop();
     expect(out.preRoll.length).toBe(24000);
   });
@@ -395,5 +406,158 @@ describe('release and discard', () => {
     feed(24000);
     await p;
     expect((await r.stop()).preRoll.length).toBe(24000);
+  });
+});
+
+describe('open edge cases', () => {
+  it('Overconstrained retry followed by NotAllowedError is denied', async () => {
+    getUserMedia.mockRejectedValueOnce(err('OverconstrainedError')).mockRejectedValueOnce(err('NotAllowedError'));
+    expect(await Recorder.open()).toEqual({ error: 'denied' });
+  });
+  it('accepts webkitAudioContext', async () => {
+    vi.stubGlobal('AudioContext', undefined);
+    vi.stubGlobal('webkitAudioContext', MockCtx);
+    const r = await Recorder.open();
+    expect('error' in r).toBe(false);
+  });
+  it('missing getSettings means processingOn false', async () => {
+    (track as unknown as { getSettings?: unknown }).getSettings = undefined;
+    expect((await openOk()).processingOn).toBe(false);
+  });
+  it('releases tracks and context if graph construction throws', async () => {
+    const orig = MockCtx.prototype.createMediaStreamSource;
+    MockCtx.prototype.createMediaStreamSource = () => {
+      throw new Error('boom');
+    };
+    try {
+      expect(await Recorder.open()).toEqual({ error: 'unsupported' });
+    } finally {
+      MockCtx.prototype.createMediaStreamSource = orig;
+    }
+    expect(track.stopped).toBe(1);
+    expect(ctxs[0].closed).toBe(1);
+  });
+});
+
+describe('after release', () => {
+  it('removes statechange and track listeners', async () => {
+    const r = await openOk();
+    expect(ctxs[0].listeners.length).toBe(1);
+    r.release();
+    expect(ctxs[0].listeners.length).toBe(0);
+    expect(track.listeners['ended']).toEqual([]);
+    expect(track.listeners['mute']).toEqual([]);
+  });
+  it('start resolves immediately without arming; stop returns empty arrays', async () => {
+    const r = await openOk();
+    r.release();
+    await r.start(() => {});
+    feed(1280);
+    const out = await r.stop();
+    expect(out.preRoll.length).toBe(0);
+    expect(out.samples.length).toBe(0);
+  });
+});
+
+describe('start races and watchdog', () => {
+  it('stop() during a pending resume is not overridden afterwards', async () => {
+    const r = await openOk();
+    ctxs[0].state = 'suspended';
+    let finish!: () => void;
+    ctxs[0].resume.mockImplementation(
+      () =>
+        new Promise<void>((res) => {
+          finish = () => {
+            ctxs[0].state = 'running';
+            res();
+          };
+        }),
+    );
+    const p = r.start(() => {});
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    const out = await r.stop();
+    expect(out.preRoll.length).toBe(0);
+    await p; // start() resolved by stop()
+    finish();
+    await new Promise((res) => setTimeout(res, 0));
+    feed(1280); // must not be collected: recorder is not armed
+    const out2 = await r.stop();
+    expect(out2.preRoll.length).toBe(0);
+  });
+
+  it('a second start() while recording returns immediately and does not re-arm', async () => {
+    const r = await openOk();
+    const p1 = r.start(() => {});
+    feed(1280);
+    await r.start(() => {}); // resolves immediately
+    feed(24000);
+    await p1;
+    const out = await r.stop();
+    expect(out.preRoll.length).toBe(24000); // first recording's data was kept
+    expect(out.samples.length).toBe(1280);
+  });
+
+  describe('watchdog (fake timers)', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('resume never settling: onInterrupted once, start() resolves, stop() empty', async () => {
+      const r = await openOk({ watchdogMs: 3000 });
+      ctxs[0].state = 'suspended';
+      ctxs[0].resume.mockImplementation(() => new Promise<void>(() => {}));
+      const spy = vi.fn();
+      r.onInterrupted = spy;
+      let resolved = false;
+      const p = r.start(() => {}).then(() => (resolved = true));
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(resolved).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      await p;
+      expect(spy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const out = await r.stop();
+      expect(out.preRoll.length + out.samples.length).toBe(0);
+    });
+
+    it('resume rejecting and no blocks: watchdog interrupts', async () => {
+      const r = await openOk({ watchdogMs: 3000 });
+      ctxs[0].state = 'suspended';
+      ctxs[0].resume.mockImplementation(() => Promise.reject(new Error('x')));
+      const spy = vi.fn();
+      r.onInterrupted = spy;
+      const p = r.start(() => {});
+      await vi.advanceTimersByTimeAsync(3001);
+      await p;
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('blocks mid-recording keep the watchdog quiet; silence for 3 s interrupts', async () => {
+      const r = await openOk({ watchdogMs: 3000 });
+      const spy = vi.fn();
+      r.onInterrupted = spy;
+      const p = r.start(() => {});
+      feed(24000);
+      await p;
+      await vi.advanceTimersByTimeAsync(2000);
+      feed(128);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(spy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const out = await r.stop();
+      expect(out.samples.length).toBe(0);
+    });
+
+    it('stop() clears the watchdog', async () => {
+      const r = await openOk({ watchdogMs: 3000 });
+      const spy = vi.fn();
+      r.onInterrupted = spy;
+      r.start(() => {});
+      feed(128);
+      await r.stop();
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 });
