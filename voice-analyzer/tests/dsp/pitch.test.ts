@@ -91,6 +91,17 @@ describe('trackPitch', () => {
     expect(Math.abs(median(voicedValues(t.f0)) - 200)).toBeLessThanOrEqual(2);
   });
 
+  it.each([
+    [48000, 15500],
+    [44100, 21000],
+  ])('rejects out-of-band %i Hz-rate content at %i Hz (no aliasing into F0 band)', (sr, hz) => {
+    const x = new Float32Array(sr * 3);
+    for (let i = 0; i < x.length; i++) x[i] = 0.8 * Math.sin((2 * Math.PI * hz * i) / sr);
+    const t = trackPitch(x, sr);
+    expect(t.f0.length).toBeGreaterThan(100);
+    expect(voicedValues(t.f0).length / t.f0.length).toBeLessThan(0.05);
+  });
+
   it('does not throw on signals shorter than a frame', () => {
     const t = trackPitch(new Float32Array(100), 16000);
     expect(t.f0).toEqual([]);

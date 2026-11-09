@@ -7,6 +7,9 @@ const HOP_SECONDS = 0.01;
 /** Without a candidate under YIN_THRESHOLD, the global minimum is voiced only below this. */
 const FALLBACK_CMND = 0.3;
 
+/** Mean-square floor corresponding to -60 dBFS RMS. */
+const SILENCE_MEAN_SQUARE = 1e-6;
+
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
@@ -26,6 +29,10 @@ function analyzeFrame(
   cmnd: Float64Array,
 ): FrameResult {
   const w = frameLen - tauMax;
+  // YIN is scale invariant, so very quiet frames (below -60 dBFS RMS, e.g. filter leakage) are unvoiced.
+  let energy = 0;
+  for (let j = 0; j < frameLen; j++) energy += x[start + j] * x[start + j];
+  if (energy / frameLen < SILENCE_MEAN_SQUARE) return { f0: null, clarity: 0 };
   // difference function + cumulative mean normalization
   let running = 0;
   cmnd[0] = 1;
@@ -106,16 +113,17 @@ function medianSmooth(f0: Array<number | null>): Array<number | null> {
 
 const TARGET_RATE = 16000;
 
-/** Low-pass (windowed sinc, cutoff 0.45 of the new Nyquist) and keep every `factor`-th sample. */
+/** Low-pass (Blackman-windowed sinc, cutoff 0.45 of the new Nyquist) and keep every `factor`-th sample. */
 function decimate(x: Float32Array, factor: number): Float32Array {
   if (factor === 1) return x;
-  const half = 4 * factor;
-  const fc = 0.45 / factor; // cycles per input sample
+  const half = 12 * factor;
+  const fc = 0.225 / factor; // 0.45 x new Nyquist (0.5 / factor), cycles per input sample
   const taps = new Float64Array(2 * half + 1);
   let sum = 0;
   for (let k = -half; k <= half; k++) {
     const sinc = k === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * k) / (Math.PI * k);
-    const win = 0.5 + 0.5 * Math.cos((Math.PI * k) / (half + 1));
+    const u = (Math.PI * k) / (half + 1);
+    const win = 0.42 + 0.5 * Math.cos(u) + 0.08 * Math.cos(2 * u); // Blackman
     taps[k + half] = sinc * win;
     sum += taps[k + half];
   }
