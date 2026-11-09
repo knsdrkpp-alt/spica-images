@@ -152,16 +152,31 @@ describe('checkGate', () => {
     if (r.ok) expect(r.warnings).toContain('processing-on');
   });
 
-  it('warns about band-limited audio but not for broadband signals', () => {
+  it('warns about band-limited audio for sentences only, not vowels or broadband signals', () => {
     const limited = scaleToPeakDb(
       harmonicTone({ f0: 150, seconds: 4, sampleRate: SR, harmonics: 20 }),
       -10,
     );
-    const r = run({ samples: limited });
+    const vowel = run({ samples: limited, task: 'vowel' });
+    expect(vowel.ok).toBe(true);
+    if (vowel.ok) expect(vowel.warnings).not.toContain('bluetooth-band-limited');
+    const r = run({ samples: limited, task: 'sentence' });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.warnings).toContain('bluetooth-band-limited');
-    const b = run();
+    // speech() has noise at -20 dB, standing in for fricative energy above 4 kHz
+    const b = run({ task: 'sentence' });
     expect(b.ok).toBe(true);
     if (b.ok) expect(b.warnings).not.toContain('bluetooth-band-limited');
+  });
+
+  it('rejects silent or empty samples without NaN or throwing', () => {
+    expect(run({ samples: silence(3, SR) })).toEqual({ ok: false, reason: 'too-quiet' });
+    expect(run({ samples: new Float32Array(0) })).toEqual({ ok: false, reason: 'too-quiet' });
+  });
+
+  it('treats an empty preRoll as unknown SNR: no reject, noise-borderline warning', () => {
+    const r = run({ preRoll: new Float32Array(0) });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.warnings).toContain('noise-borderline');
   });
 });

@@ -57,7 +57,9 @@ function speechRmsDbfs(x: Float32Array, sampleRate: number): number {
     for (let i = s; i < end; i++) e += x[i] * x[i];
     energies.push(e / (end - s));
   }
-  const maxDb = toDb(Math.max(0, ...energies));
+  let maxE = 0;
+  for (const e of energies) if (e > maxE) maxE = e;
+  const maxDb = toDb(maxE);
   if (maxDb <= FLOOR_DBFS) return FLOOR_DBFS;
   let sum = 0;
   let n = 0;
@@ -111,9 +113,11 @@ export function checkGate(input: GateInput): GateResult {
   if (clipped) return { ok: false, reason: 'clipping' };
   if (peakDbfs < GATE.peakQuietDbfs) return { ok: false, reason: 'too-quiet' };
 
+  // A missing/empty preRoll means the SNR is unknown: skip the SNR reject and warn instead.
+  const snrKnown = preRoll.length > 0;
   const noiseDbfs = rmsDbfs(preRoll);
-  const snrDb = speechRmsDbfs(samples, sampleRate) - noiseDbfs;
-  if (snrDb < GATE.snrRejectDb) return { ok: false, reason: 'too-noisy' };
+  const snrDb = snrKnown ? speechRmsDbfs(samples, sampleRate) - noiseDbfs : Number.NaN;
+  if (snrKnown && snrDb < GATE.snrRejectDb) return { ok: false, reason: 'too-noisy' };
 
   if (task === 'vowel') {
     if (features.voicedSeconds < GATE.vowelStableMinSeconds) {
@@ -131,9 +135,12 @@ export function checkGate(input: GateInput): GateResult {
   }
 
   const warnings: GateWarning[] = [];
-  if (snrDb < GATE.snrOkDb || noiseDbfs > GATE.noiseFloorMaxDbfs) warnings.push('noise-borderline');
+  if (!snrKnown || snrDb < GATE.snrOkDb || noiseDbfs > GATE.noiseFloorMaxDbfs) warnings.push('noise-borderline');
   if (peakDbfs < GATE.peakTargetDbfs[0]) warnings.push('low-level');
+  // Sentences only: a sustained vowel is naturally low-passed, so this check would false-alarm on it,
+  // whereas real speech (fricatives, bursts) has energy above 4 kHz.
   if (
+    task === 'sentence' &&
     sampleRate >= 16000 &&
     highBandShare(samples, sampleRate) < BLUETOOTH_SHARE_MAX
   ) {
