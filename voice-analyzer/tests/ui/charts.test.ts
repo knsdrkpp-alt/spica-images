@@ -67,3 +67,33 @@ describe('renderPieChart', () => {
     expect(allAttrs(svg).some((v) => v.includes('NaN'))).toBe(false);
   });
 });
+
+describe('pie geometry', () => {
+  const nums = (d: string) => (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+  it('four quarters start at 12 o\'clock, run clockwise, large-arc 0', () => {
+    const svg = renderPieChart([0.25, 0.25, 0.25, 0.25, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const ds = Array.from(svg.querySelectorAll('path')).map((p) => p.getAttribute('d')!);
+    expect(ds).toHaveLength(4);
+    const ends = ds.map((d) => nums(d));
+    // M c c L x1 y1 A r r rot large sweep x2 y2
+    expect(ends[0].slice(0, 2)).toEqual([100, 100]);
+    expect(ends[0][2]).toBeCloseTo(100); expect(ends[0][3]).toBeCloseTo(10); // starts at top
+    expect(ends[0][9]).toBeCloseTo(190); expect(ends[0][10]).toBeCloseTo(100); // quarter ends at 3 o'clock
+    expect(ends[1][9]).toBeCloseTo(100); expect(ends[1][10]).toBeCloseTo(190);
+    for (const e of ends) { expect(e[7]).toBe(0); expect(e[8]).toBe(1); }
+  });
+  it('normalizes by the sum', () => {
+    const d = (v: number) => Array.from(renderPieChart(new Array(12).fill(v)).querySelectorAll('path')).map((p) => p.getAttribute('d'));
+    expect(d(2)).toEqual(d(1));
+  });
+  it('a share over one half uses the large arc', () => {
+    const s = new Array(12).fill(0); s[0] = 0.7; s[1] = 0.3;
+    const ds = Array.from(renderPieChart(s).querySelectorAll('path')).map((p) => nums(p.getAttribute('d')!));
+    expect(ds[0][7]).toBe(1);
+    expect(ds[1][7]).toBe(0);
+  });
+  it('tiny slices read 1%未満 in titles', () => {
+    const s = new Array(12).fill(0); s[0] = 0.001; s[1] = 0.999;
+    expect(renderPieChart(s).querySelector('path title')!.textContent).toContain('1%未満');
+  });
+});

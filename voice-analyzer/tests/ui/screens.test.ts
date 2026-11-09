@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import {
   renderStart, renderRecording, renderResult, renderMicError, renderRetry,
@@ -41,8 +42,14 @@ describe('renderResult', () => {
     expect(el.querySelectorAll('svg')).toHaveLength(2);
     expect(el.textContent).toContain('グラフの読み方');
   });
+  it('keeps STOP_NOTICE and footer exactly once even without practice steps', () => {
+    const el = renderResult({ ...fb, practice: [] }, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop });
+    expect(count(el.textContent!, STOP_NOTICE)).toBe(1);
+    expect(count(el.textContent!, FIXED_FOOTER)).toBe(1);
+    expect(el.lastElementChild!.tagName).toBe('FOOTER');
+  });
   it('shows 仮の基準 only when provisional', () => {
-    expect(result({ provisionalNorms: true }).textContent).toContain('仮の基準');
+    expect(count(result({ provisionalNorms: true }).textContent!, '仮の基準')).toBe(1);
     expect(result({ provisionalNorms: false }).textContent).not.toContain('仮の基準');
   });
   it('record-more button follows canRecordMore', () => {
@@ -58,7 +65,9 @@ describe('renderResult', () => {
     expect(el.textContent).toContain('音響的な裏づけは弱い、一般的な目安です');
     expect(el.textContent).not.toContain(BAND_NOTES[3]);
     legend[3].click();
-    expect(el.textContent).toContain(BAND_NOTES[3]);
+    expect(el.textContent).toContain(`4(299〜431 Hz):${BAND_NOTES[3]}`);
+    expect(legend[3].textContent).toContain('4');
+    expect(legend[3].textContent).toContain('299〜431 Hz');
     expect(legend[3].getAttribute('aria-expanded')).toBe('true');
     legend[3].click();
     expect(el.textContent).not.toContain(BAND_NOTES[3]);
@@ -77,6 +86,16 @@ describe('renderMicError', () => {
     buttonByText(renderMicError('denied', onBack), '説明にもどる')!.click();
     expect(onBack).toHaveBeenCalled();
     expect(renderMicError('denied', noop).textContent).toContain('ブラウザの設定でマイクを許可');
+  });
+  it('uses the neutral notice-screen class, and its CSS heading is not the accent colour', () => {
+    for (const e of MIC) expect(renderMicError(e, noop).classList.contains('notice-screen')).toBe(true);
+    for (const r of REASONS) expect(renderRetry(r, noop).classList.contains('notice-screen')).toBe(true);
+    const css = readFileSync('src/ui/styles.css', 'utf8');
+    const rule = css.match(/\.notice-screen h1\s*\{([^}]*)\}/);
+    expect(rule).not.toBeNull();
+    const color = rule![1].match(/color:\s*([^;]+);/)![1].trim();
+    expect(color).not.toBe('var(--accent)');
+    expect(color).not.toMatch(/#c8213c/i);
   });
   it('uses neutral styling', () => {
     for (const e of MIC) {
@@ -174,7 +193,12 @@ describe('banned-word lint over all screens', () => {
     }));
     for (const e of MIC) els.push(renderMicError(e, noop));
     for (const r of REASONS) els.push(renderRetry(r, noop));
-    for (const el of els) expect(findBannedWords(el.textContent ?? '')).toEqual([]);
+    for (const el of els) {
+      expect(findBannedWords(el.textContent ?? '')).toEqual([]);
+      for (const n of [el, ...Array.from(el.querySelectorAll('*'))]) {
+        for (const a of ['aria-label', 'title', 'alt']) expect(findBannedWords(n.getAttribute(a) ?? '')).toEqual([]);
+      }
+    }
     // legend notes too
     expect(findBannedWords(BAND_NOTES.join(''))).toEqual([]);
   });

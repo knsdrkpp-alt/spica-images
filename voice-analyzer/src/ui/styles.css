@@ -5,6 +5,9 @@
   --accent: #c8213c;
   --accent-fg: #ffffff;
   --border: #d9d9d9;
+  --focus: #1a5fb4;
+  --label: #111111;
+  --halo: #ffffff;
   --surface: #f6f4f2;
   --serif: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
@@ -33,7 +36,7 @@ h3 { font-size: 1.05rem; margin: 20px 0 6px; }
 p { margin: 8px 0; }
 .note { color: var(--muted); font-size: 0.875rem; }
 
-.notice { background: var(--surface); border-left: 4px solid var(--accent); padding: 8px 12px; border-radius: 4px; }
+.notice { background: var(--surface); border-left: 4px solid var(--border); padding: 8px 12px; border-radius: 4px; }
 .notice h2, .notice h3 { margin-top: 4px; }
 
 .btn {
@@ -45,7 +48,7 @@ p { margin: 8px 0; }
 .btn[hidden] { display: none; }
 
 button:focus-visible, input:focus-visible {
-  outline: 3px solid #1a5fb4; outline-offset: 2px;
+  outline: 3px solid var(--focus); outline-offset: 2px;
 }
 
 fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px 0 0; padding: 8px 12px 12px; }
@@ -56,8 +59,8 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
 .chart { width: 100%; height: auto; display: block; }
 .chart .axis { stroke: var(--border); stroke-width: 1; }
 .chart .tick { font-size: 10px; fill: var(--muted); }
-.chart .pie-label { font-size: 10px; font-weight: 700; fill: #111; stroke: #fff; stroke-width: 2.5px; paint-order: stroke; }
-.chart .wedge { stroke: #fff; stroke-width: 1; }
+.chart .pie-label { font-size: 10px; font-weight: 700; fill: var(--label); stroke: var(--halo); stroke-width: 2.5px; paint-order: stroke; }
+.chart .wedge { stroke: var(--halo); stroke-width: 1; }
 .chart .pie-empty { fill: var(--surface); stroke: var(--border); }
 .chart-pie { max-width: 260px; margin: 0 auto; }
 
@@ -77,3 +80,5 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
 .prompt { font-family: var(--serif); font-size: 1.25rem; }
 
 .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
+
+.notice-screen h1 { color: var(--fg); }

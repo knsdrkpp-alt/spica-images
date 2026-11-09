@@ -5,7 +5,7 @@ import type { GateReason } from '../diagnosis/gate';
 import type { MicError } from '../audio/capture';
 import type { Sex } from '../types';
 import { BAND_NOTES } from './band-notes';
-import { renderBarChart, renderPieChart } from './charts';
+import { renderBarChart, renderPieChart, svgEl } from './charts';
 
 type Child = string | Node;
 
@@ -83,15 +83,10 @@ export function renderRecording(onStop: () => void): RecordingView {
   const status = h('p', { class: 'status', role: 'status' });
   const prompt = h('p', { class: 'prompt' });
   const sub = h('p', { class: 'note' });
-  const NS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${WAVE.w} ${WAVE.h}`);
-  svg.setAttribute('class', 'wave');
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', '録音中の声の波形');
-  const line = document.createElementNS(NS, 'polyline');
-  line.setAttribute('fill', 'none');
-  line.setAttribute('points', `0,${WAVE.h / 2} ${WAVE.w},${WAVE.h / 2}`);
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${WAVE.w} ${WAVE.h}`, class: 'wave', role: 'img', 'aria-label': '録音中の声の波形',
+  });
+  const line = svgEl('polyline', { fill: 'none', points: `0,${WAVE.h / 2} ${WAVE.w},${WAVE.h / 2}` });
   svg.appendChild(line);
   const stop = button('終了', onStop, 'btn primary');
   stop.hidden = true;
@@ -131,7 +126,7 @@ export function renderRecording(onStop: () => void): RecordingView {
   return { el: view, setPhase, setReady, setWave };
 }
 
-const fmtHz = (hz: number) => (hz >= 1000 ? `${+(hz / 1000).toFixed(2)} kHz` : `${hz} Hz`);
+const hzRange = (i: number) => `${BAND_EDGES_HZ[i]}〜${BAND_EDGES_HZ[i + 1]} Hz`;
 
 export function renderResult(
   f: Feedback,
@@ -144,11 +139,11 @@ export function renderResult(
     const swatch = h('span', { class: 'swatch', 'aria-hidden': 'true' });
     swatch.style.background = color;
     const b = h('button', { type: 'button', class: 'legend-item', 'aria-expanded': 'false' },
-      swatch, `${fmtHz(BAND_EDGES_HZ[i])}〜${fmtHz(BAND_EDGES_HZ[i + 1])}`);
+      swatch, `${i + 1}  ${hzRange(i)}`);
     b.addEventListener('click', () => {
       open = open === i ? -1 : i;
       legendButtons.forEach((x, j) => x.setAttribute('aria-expanded', String(j === open)));
-      note.textContent = open === -1 ? '' : BAND_NOTES[i];
+      note.textContent = open === -1 ? '' : `${i + 1}(${hzRange(i)}):${BAND_NOTES[i]}`;
     });
     return b;
   });
@@ -158,7 +153,7 @@ export function renderResult(
     h('p', {}, f.tendency),
   );
   if (opts.provisionalNorms) {
-    root.append(h('p', { class: 'notice' }, '基準値は仮のものです(仮の基準)。今後の調整で、表示が変わることがあります。'));
+    root.append(h('p', { class: 'notice' }, 'いまは仮の基準を使っているため、今後の調整で表示が変わることがあります。'));
   }
   root.append(
     h('section', { class: 'charts' },
@@ -167,7 +162,7 @@ export function renderResult(
     ),
     h('section', { class: 'notice' },
       h('h3', {}, 'グラフの読み方'),
-      h('p', {}, '棒グラフは帯域ごとの相対的な強さ、円グラフはその割合です。どちらも相対値で、録音した機種などによって変わる目安です。'),
+      h('p', {}, '棒グラフは帯域ごとの相対的な強さ、円グラフはその割合です。どちらも相対値で、録音した機種などによって変わる目安です。棒グラフの軸は相対的な0〜60の目盛りで、いちばん高い棒を60にそろえています(割合ではありません)。'),
     ),
     h('section', {},
       h('h3', {}, '帯域の凡例'),
@@ -183,9 +178,9 @@ export function renderResult(
       h('h3', {}, '練習のヒント'),
       h('ol', {}, ...f.practice.map((p) =>
         h('li', {}, h('strong', {}, `${p.title}(${p.minutes}分)`), h('p', {}, p.how)))),
-      h('p', { class: 'notice' }, STOP_NOTICE),
     ));
   }
+  root.append(h('p', { class: 'notice' }, STOP_NOTICE));
   if (opts.canRecordMore) root.append(button('もう1セット録音する', opts.onAgain, 'btn primary'));
   root.append(h('footer', { class: 'footer' }, FIXED_FOOTER));
   return root;
