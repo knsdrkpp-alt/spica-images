@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseWav } from '../../scripts/wav';
+import { parseWav, quantize16, writeWav } from '../../scripts/wav';
 
 function makeWav(samples: number[], sampleRate: number): Uint8Array {
   const buf = new ArrayBuffer(44 + samples.length * 2);
@@ -26,5 +26,19 @@ describe('parseWav', () => {
     const b = makeWav([0, 0], 16000);
     new DataView(b.buffer).setUint16(22, 2, true);
     expect(() => parseWav(b)).toThrow();
+  });
+});
+
+describe('writeWav', () => {
+  it('round-trips through parseWav with 16-bit quantization', () => {
+    const x = new Float32Array([0, 0.5, -0.5, 0.99999, -1, 1.5, -2, 0.25]);
+    const bytes = writeWav(x, 48000);
+    expect(bytes.length).toBe(44 + x.length * 2);
+    const { samples, sampleRate } = parseWav(bytes);
+    expect(sampleRate).toBe(48000);
+    expect(Array.from(samples)).toEqual(Array.from(quantize16(x)));
+    expect(samples[1]).toBe(0.5);
+    expect(samples[5]).toBe(32767 / 32768); // clipped
+    expect(samples[6]).toBe(-1);
   });
 });

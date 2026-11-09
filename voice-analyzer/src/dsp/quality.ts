@@ -1,25 +1,31 @@
 /**
  * Voice clarity measures: CPPS, HNR, H1-H2 and pitch stability.
  *
- * PROVISIONAL: parameters follow the task brief and the Praat recipes as remembered (the Praat
- * manual was not reachable while writing this). Task 13 validates against Parselmouth.
+ * Parameters were first written from memory of the Praat recipes (manual not reachable). Task 13
+ * measured CPPS/HNR/F0 against Praat 6.1.38 via Parselmouth 0.4.7 on 32 SYNTHETIC voices
+ * (tests/golden; no human recordings yet) and aligned CPPS (window, grid, robust fit) to it.
  *
- * CPPS (after Praat `To PowerCepstrogram` + `Get CPPS`, Hillenbrand-style trend line)
+ * CPPS (after Praat `To PowerCepstrogram` 60 Hz/0.002 s/5000 Hz/50 Hz + `Get CPPS` defaults)
  *   - pre-emphasis: first order, from 50 Hz (y[n] = x[n] - a·x[n-1], a = exp(-2π·50/fs))  [Praat default 50 Hz]
- *   - frames: Hann window, 40 ms, hop 10 ms (brief). Praat uses a Gaussian window and a 2 ms
- *     time step by default; this differs on purpose (brief) and is UNVERIFIED in effect.
- *   - spectrum: 10·log10(|X|²), FFT zero-padded to 2× the next power of two, linearly
- *     interpolated onto a fixed grid of 513 points over 0 .. 5000 Hz (or 0 .. fs/2 if lower).
- *     This acts like Praat's resampling to 2 × 5000 Hz and makes the cepstrum sample-rate
- *     independent; quefrency step = 1 / (2·5000) s = 0.1 ms.
+ *   - frames: Gaussian window exp(-12·(t/T - 1/2)²) (edges subtracted, renormalized), physical
+ *     length T = 100 ms (= 2 · 3 / 60 Hz pitch floor, Praat style), hop 10 ms. Praat's time step is
+ *     2 ms; measured effect on Praat's own CPPS ≈ 0.1 dB on the golden set, so 10 ms is kept for speed.
+ *     (Task 13: was 40 ms Hann; this window alone cut the golden worst |Δ| from 9.35 to 4.13 dB.)
+ *   - spectrum: |X|², FFT zero-padded to 2× the next power of two (two real frames share one
+ *     complex FFT for speed; float32, which shifts noise-free synthetic tones by up to ~1 dB but
+ *     not the noisy golden cases), power-averaged over the FFT bins
+ *     falling in each cell of a fixed grid of 513 points over 0 .. 5000 Hz (or 0 .. fs/2 if lower),
+ *     then 10·log10. This stands in for Praat's resampling to 2 × 5000 Hz and makes the cepstrum
+ *     sample-rate independent; quefrency step = 1 / (2·5000) s = 0.1 ms.
  *   - cepstrum: inverse FFT of the symmetric dB spectrum (1024 points), power cepstrum c².
  *   - smoothing (on linear c² values): time ±1 frame (≈ 20 ms window at 10 ms hop, over kept
  *     frames only) then quefrency ±2 bins (0.5 ms window). [Praat defaults 0.02 s / 0.0005 s;
- *     whether Praat smooths linear or dB values is UNVERIFIED]
- *   - trend: ordinary least-squares straight line of cepstrum dB vs quefrency over
- *     1 ms .. 50 ms. [Praat default range 0.001-0.05 s; Praat's newer default fit method is
- *     "Robust", which is UNVERIFIED here]
- *   - peak: maximum within quefrency 1/500 .. 1/60 s (brief; Praat default 60-330 Hz),
+ *     smoothing dB values instead was measured worse vs Praat (golden worst |Δ| 11.2 dB)]
+ *   - trend: robust straight line of cepstrum dB vs quefrency over 1 ms .. 50 ms: "incomplete"
+ *     Theil-Sen (slope = median of (y[i+n/2]-y[i])/(x[i+n/2]-x[i]), intercept = median residual),
+ *     matching Praat's "Robust" fit method closely on the golden set. [Praat range 0.001-0.05 s]
+ *   - peak: maximum within quefrency 1/500 .. 1/60 s (brief, app F0 range; Praat default 60-330 Hz,
+ *     which changed the golden results by < 0.02 dB because all golden F0s are <= 200 Hz),
  *     parabolic interpolation in dB; CPP = peak dB - trend dB at the peak quefrency.
  *   - CPPS = mean CPP over frames. With `removeSilence`, frames whose RMS is more than 35 dB
  *     below the loudest frame are dropped before smoothing and averaging.
@@ -30,7 +36,9 @@
  *     cross-correlation r(τ) = Σx[n]x[n+τ] / sqrt(Σx[n]² Σx[n+τ]²) at the integer lags around
  *     τ = fs/F0 (±1 sample beyond floor/ceil), max with parabolic refinement, r clamped to
  *     [1e-6, 1-1e-6], HNR = 10·log10(r/(1-r)); result = median over voiced frames.
- *     (Praat's cc method searches the lag itself and uses its own window; UNVERIFIED.)
+ *     (Praat's cc method searches the lag itself and uses its own window. Task 13 golden set:
+ *     within 0.55 dB of Praat's `Get mean` on the noisy cases; on noise-free tones Praat reports
+ *     79-130 dB while ours saturates at 39-60 dB by design, see tests/golden.)
  *   - null with fewer than 10 usable voiced frames. Clamp caps HNR at 60 dB.
  *
  * H1-H2 (uncorrected)
@@ -47,6 +55,8 @@ import { hzToSemitone } from './pitch';
 
 const FRAME_SECONDS = 0.04;
 const HOP_SECONDS = 0.01;
+/** CPPS analysis window: Gaussian, physical length 2 · 3 / 60 Hz (Praat style). */
+const CPPS_FRAME_SECONDS = 0.1;
 const MIN_VOICED_FRAMES = 10;
 
 const PRE_EMPHASIS_HZ = 50;
@@ -77,6 +87,24 @@ function hann(n: number): Float32Array {
   return w;
 }
 
+/** Praat-style Gaussian window: exp(-12 (t/T - 1/2)²) with the edge value removed. */
+function gaussian(n: number): Float32Array {
+  const w = new Float32Array(n);
+  const edge = Math.exp(-12);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n - 0.5;
+    w[i] = (Math.exp(-48 * t * t) - edge) / (1 - edge);
+  }
+  return w;
+}
+
+/** In-place sort, then median. */
+function medianInPlace(v: Float64Array): number {
+  v.sort();
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
 function median(v: number[]): number {
   const s = [...v].sort((a, b) => a - b);
   const m = s.length >> 1;
@@ -96,7 +124,7 @@ export function cpps(
   sampleRate: number,
   opts: { removeSilence?: boolean } = {},
 ): number | null {
-  const frameLen = Math.round(FRAME_SECONDS * sampleRate);
+  const frameLen = Math.round(CPPS_FRAME_SECONDS * sampleRate);
   const hop = Math.round(HOP_SECONDS * sampleRate);
   if (frameLen < 2 || samples.length < frameLen) return null;
   const frameCount = Math.floor((samples.length - frameLen) / hop) + 1;
@@ -121,7 +149,7 @@ export function cpps(
   x[0] = samples[0];
   for (let i = 1; i < samples.length; i++) x[i] = samples[i] - a * samples[i - 1];
 
-  const win = hann(frameLen);
+  const win = gaussian(frameLen);
   const nfft = 2 * nextPow2(frameLen);
   const binHz = sampleRate / nfft;
   const maxHz = Math.min(CEPSTRUM_MAX_HZ, sampleRate / 2);
@@ -133,25 +161,26 @@ export function cpps(
 
   const re = new Float32Array(nfft);
   const im = new Float32Array(nfft);
-  const db = new Float64Array(topBin + 1);
+  const pw = new Float64Array(topBin + 1);
+  // FFT bin range [cellLo[g], cellHi[g]] averaged into grid point g
+  const cellLo = new Int32Array(GRID_HALF + 1);
+  const cellHi = new Int32Array(GRID_HALF + 1);
+  for (let g = 0; g <= GRID_HALF; g++) {
+    const lo = Math.max(0, Math.round(((g - 0.5) * gridHz) / binHz));
+    cellLo[g] = lo;
+    cellHi[g] = Math.max(lo, Math.min(topBin, Math.round(((g + 0.5) * gridHz) / binHz) - 1));
+  }
   const cre = new Float32Array(nCep);
   const cim = new Float32Array(nCep);
   // power cepstra (linear c²) of kept frames; null for dropped frames
   const cep: Array<Float64Array | null> = new Array(frameCount).fill(null);
 
-  for (let f = 0; f < frameCount; f++) {
-    if (!kept[f]) continue;
-    re.fill(0);
-    im.fill(0);
-    const s0 = f * hop;
-    for (let j = 0; j < frameLen; j++) re[j] = x[s0 + j] * win[j];
-    fft(re, im);
-    for (let k = 0; k <= topBin; k++) db[k] = 10 * Math.log10(re[k] * re[k] + im[k] * im[k] + POWER_FLOOR);
+  const pwB = new Float64Array(topBin + 1);
+  const powerCepstrum = (power: Float64Array): Float64Array => {
     for (let g = 0; g <= GRID_HALF; g++) {
-      const pos = (g * gridHz) / binHz;
-      const k0 = Math.min(Math.floor(pos), topBin - 1);
-      const t = pos - k0;
-      const v = db[k0] * (1 - t) + db[k0 + 1] * t;
+      let s = 0;
+      for (let k = cellLo[g]; k <= cellHi[g]; k++) s += power[k];
+      const v = 10 * Math.log10(s / (cellHi[g] - cellLo[g] + 1) + POWER_FLOOR);
       cre[g] = v;
       if (g > 0 && g < GRID_HALF) cre[nCep - g] = v;
     }
@@ -162,7 +191,30 @@ export function cpps(
       const c = cre[q] / nCep;
       p[q] = c * c;
     }
-    cep[f] = p;
+    return p;
+  };
+
+  // Two real frames per complex FFT (A in re, B in im); separated exactly via conjugate symmetry:
+  // |A[k]|² = |Z[k] + conj Z[N-k]|² / 4, |B[k]|² = |Z[k] - conj Z[N-k]|² / 4.
+  const keptFrames: number[] = [];
+  for (let f = 0; f < frameCount; f++) if (kept[f]) keptFrames.push(f);
+  for (let i = 0; i < keptFrames.length; i += 2) {
+    const fa = keptFrames[i];
+    const fb = i + 1 < keptFrames.length ? keptFrames[i + 1] : -1;
+    re.fill(0);
+    im.fill(0);
+    for (let j = 0; j < frameLen; j++) re[j] = x[fa * hop + j] * win[j];
+    if (fb >= 0) for (let j = 0; j < frameLen; j++) im[j] = x[fb * hop + j] * win[j];
+    fft(re, im);
+    for (let k = 0; k <= topBin; k++) {
+      const m = k === 0 ? 0 : nfft - k;
+      const ar = re[k] + re[m], ai = im[k] - im[m]; // 2·A[k]
+      const br = im[k] + im[m], bi = re[m] - re[k]; // 2·B[k]
+      pw[k] = 0.25 * (ar * ar + ai * ai);
+      pwB[k] = 0.25 * (br * br + bi * bi);
+    }
+    cep[fa] = powerCepstrum(pw);
+    if (fb >= 0) cep[fb] = powerCepstrum(pwB);
   }
 
   const peakLo = Math.max(1, Math.ceil(PEAK_QUEFRENCY_S[0] / dq));
@@ -170,6 +222,10 @@ export function cpps(
   const trendLo = Math.max(1, Math.ceil(TREND_QUEFRENCY_S[0] / dq));
   const trendHi = Math.min(halfCep, Math.floor(TREND_QUEFRENCY_S[1] / dq));
 
+  const nt = trendHi - trendLo + 1;
+  const half = nt >> 1;
+  const slopes = new Float64Array(half);
+  const resid = new Float64Array(nt);
   const timeAvg = new Float64Array(halfCep + 1);
   const smooth = new Float64Array(halfCep + 1);
   let sum = 0;
@@ -195,18 +251,11 @@ export function cpps(
       }
       smooth[q] = 10 * Math.log10(s / (m * n) + POWER_FLOOR);
     }
-    // least-squares trend line over the trend range
-    let sx = 0, sy = 0, sxx = 0, sxy = 0;
-    const nt = trendHi - trendLo + 1;
-    for (let q = trendLo; q <= trendHi; q++) {
-      const qs = q * dq;
-      sx += qs;
-      sy += smooth[q];
-      sxx += qs * qs;
-      sxy += qs * smooth[q];
-    }
-    const slope = (nt * sxy - sx * sy) / (nt * sxx - sx * sx);
-    const intercept = (sy - slope * sx) / nt;
+    // robust ("incomplete" Theil-Sen) trend line over the trend range
+    for (let i = 0; i < half; i++) slopes[i] = (smooth[trendLo + i + half] - smooth[trendLo + i]) / (half * dq);
+    const slope = medianInPlace(slopes);
+    for (let i = 0; i < nt; i++) resid[i] = smooth[trendLo + i] - slope * (trendLo + i) * dq;
+    const intercept = medianInPlace(resid);
     let best = peakLo;
     for (let q = peakLo + 1; q <= peakHi; q++) if (smooth[q] > smooth[best]) best = q;
     const pk = parabolic(smooth[best - 1], smooth[best], smooth[best + 1]);
