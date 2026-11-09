@@ -52,6 +52,21 @@ describe('spectrum', () => {
     expect(idx).toEqual([6, 6, 6]);
   });
 
+  it('centroid and alpha ratio are consistent across sample rates', () => {
+    // Same harmonic signal; differences come only from FFT bin resolution
+    // and edge effects, so loose tolerances (15% / 3 dB) are enough.
+    const rates = [16000, 44100, 48000];
+    const specs = rates.map((sr) =>
+      longTermSpectrum(harmonicTone({ f0: 150, seconds: 1, sampleRate: sr }), sr),
+    );
+    const cs = specs.map(spectralCentroidHz);
+    const as = specs.map(alphaRatioDb);
+    for (let i = 1; i < rates.length; i++) {
+      expect(Math.abs(cs[i] - cs[0]) / cs[0]).toBeLessThan(0.15);
+      expect(Math.abs(as[i] - as[0])).toBeLessThan(3);
+    }
+  });
+
   it('steeper tilt gives lower alpha ratio', () => {
     const sr = 16000;
     const steep = harmonicTone({ f0: 150, seconds: 1, sampleRate: sr, tiltDbPerOctave: -12 });
@@ -68,14 +83,26 @@ describe('spectrum', () => {
 
   it('voicedMask selects frames', () => {
     const sr = 16000;
-    const { hop } = spectrumFrameLayout(sr);
-    const a = harmonicTone({ f0: 300, seconds: 0.5, sampleRate: sr, harmonics: 1 });
-    const x = new Float32Array(a.length * 2);
-    x.set(a, 0); // second half silent
-    const nFrames = Math.floor((x.length - 1024) / hop) + 1;
-    const mask = Array.from({ length: nFrames }, (_, i) => i * hop + 1024 <= a.length);
-    const c = spectralCentroidHz(longTermSpectrum(x, sr, mask));
-    expect(Math.abs(c - 300)).toBeLessThan(15);
+    const { frameLength, hop } = spectrumFrameLayout(sr);
+    const lo = harmonicTone({ f0: 300, seconds: 0.5, sampleRate: sr, harmonics: 1 });
+    const hi = harmonicTone({ f0: 1000, seconds: 0.5, sampleRate: sr, harmonics: 1 });
+    const x = new Float32Array(lo.length + hi.length);
+    x.set(lo, 0);
+    x.set(hi, lo.length);
+    const nFrames = Math.floor((x.length - frameLength) / hop) + 1;
+    const first = Array.from({ length: nFrames }, (_, i) => i * hop + frameLength <= lo.length);
+    const second = Array.from({ length: nFrames }, (_, i) => i * hop >= lo.length);
+    expect(first.some(Boolean)).toBe(true);
+    expect(second.some(Boolean)).toBe(true);
+    const cLo = spectralCentroidHz(longTermSpectrum(x, sr, first));
+    const cHi = spectralCentroidHz(longTermSpectrum(x, sr, second));
+    const cAll = spectralCentroidHz(longTermSpectrum(x, sr));
+    expect(Math.abs(cLo - 300)).toBeLessThan(15);
+    expect(Math.abs(cHi - 1000)).toBeLessThan(30);
+    expect(cAll).toBeGreaterThan(cLo + 50);
+    expect(cAll).toBeLessThan(cHi - 50);
+    const none = longTermSpectrum(x, sr, new Array(nFrames).fill(false));
+    expect(none.power.every((v) => v === 0)).toBe(true);
   });
 
   it('is finite for silence, short input and empty mask', () => {
@@ -91,7 +118,7 @@ describe('spectrum', () => {
   });
 
   it('zeros bands above Nyquist and renormalizes', () => {
-    const sr = 8000; // Nyquist 4000: bands 10,11 (3860+...) 11 starts 5563
+    const sr = 8000; // Nyquist 4000: band 11 starts at 5563 Hz (above Nyquist) so it must be 0
     const x = harmonicTone({ f0: 1000, seconds: 1, sampleRate: sr, harmonics: 1 });
     const shares = bandShares(longTermSpectrum(x, sr));
     expect(shares[11]).toBe(0);
