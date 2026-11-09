@@ -3,6 +3,12 @@ import workletUrl from './recorder-worklet.ts?worker&url';
 export type MicError = 'denied' | 'no-device' | 'insecure-context' | 'unsupported';
 
 const PRE_ROLL_SECONDS = 0.5;
+/**
+ * Audio arriving in the first SETTLE_MS after start() is dropped before the pre-roll begins:
+ * it swallows stale queued worklet messages, the tail of the previous phase and quick re-taps,
+ * none of which belong in the noise-floor estimate.
+ */
+export const SETTLE_MS = 200;
 /** No audio block for this long (during start or recording) counts as an interruption. */
 export const START_WATCHDOG_MS = 3000;
 
@@ -37,6 +43,7 @@ export class Recorder {
   private preLen = 0;
   private sampChunks: Float32Array[] = [];
   private sampLen = 0;
+  private settleLeft = 0;
   private preRollWaiter: (() => void) | null = null;
   private gen = 0;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -160,6 +167,7 @@ export class Recorder {
     this.resetBuffers();
     this.interrupted = false;
     this.onLevel = onLevel;
+    this.settleLeft = Math.round((SETTLE_MS / 1000) * this.sampleRate);
     this.recording = true;
     const done = new Promise<void>((resolve) => {
       this.preRollWaiter = resolve;
@@ -216,6 +224,12 @@ export class Recorder {
   private handleBlock(block: Float32Array): void {
     if (!this.recording) return;
     this.armWatchdog();
+    if (this.settleLeft > 0) {
+      const drop = Math.min(this.settleLeft, block.length);
+      this.settleLeft -= drop;
+      if (drop === block.length) return;
+      block = block.subarray(drop);
+    }
     let sum = 0;
     for (let i = 0; i < block.length; i++) sum += block[i] * block[i];
     const rms = block.length ? Math.sqrt(sum / block.length) : 0;
@@ -267,6 +281,7 @@ export class Recorder {
   }
 
   private resetBuffers(): void {
+    this.settleLeft = 0;
     this.preChunks = [];
     this.preLen = 0;
     this.sampChunks = [];

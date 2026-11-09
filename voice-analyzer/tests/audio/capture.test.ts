@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Recorder } from '../../src/audio/capture';
+import { Recorder, SETTLE_MS } from '../../src/audio/capture';
 
 type Listener = () => void;
 
@@ -157,6 +157,9 @@ function feed(total: number, offset = 0): Float32Array {
   return all;
 }
 
+const settleOf = (sr: number) => Math.round((SETTLE_MS / 1000) * sr);
+const SETTLE = 9600; // 200 ms at 48 kHz
+
 describe('Recorder.open errors', () => {
   it('maps NotAllowedError to denied', async () => {
     getUserMedia.mockRejectedValue(err('NotAllowedError'));
@@ -233,9 +236,10 @@ describe('recording', () => {
     const r = await openOk();
     const levels: number[] = [];
     const p = r.start((rms) => levels.push(rms));
-    const fed1 = feed(24000);
+    feed(SETTLE); // dropped settle period
+    const fed1 = feed(24000, SETTLE);
     await p; // resolves once preRoll is collected
-    const fed2 = feed(48000, 24000);
+    const fed2 = feed(48000, SETTLE + 24000);
     const out = await r.stop();
     expect(out.preRoll.length).toBe(24000);
     expect(out.samples.length).toBe(48000);
@@ -250,19 +254,57 @@ describe('recording', () => {
     sampleRateToUse = 44100; // preRoll 22050, not a multiple of 128
     const r = await openOk();
     const p = r.start(() => {});
-    const all = feed(22050 + 1000);
+    const settle = settleOf(44100);
+    const all = feed(settle + 22050 + 1000);
     await p;
     const out = await r.stop();
     expect(out.preRoll.length).toBe(22050);
     expect(out.samples.length).toBe(1000);
-    expect(Array.from(out.preRoll)).toEqual(Array.from(all.subarray(0, 22050)));
-    expect(Array.from(out.samples)).toEqual(Array.from(all.subarray(22050)));
+    expect(Array.from(out.preRoll)).toEqual(Array.from(all.subarray(settle, settle + 22050)));
+    expect(Array.from(out.samples)).toEqual(Array.from(all.subarray(settle + 22050)));
+  });
+
+  it('drops the first 200 ms: neither preRoll nor samples contain it', async () => {
+    const r = await openOk();
+    const p = r.start(() => {});
+    workletNodes[0].feed(new Float32Array(SETTLE).fill(0.9));
+    workletNodes[0].feed(new Float32Array(24000).fill(0.01));
+    await p;
+    const out = await r.stop();
+    expect(out.preRoll.length).toBe(24000);
+    expect(Math.max(...out.preRoll)).toBeCloseTo(0.01, 6);
+    expect(out.samples.length).toBe(0);
+  });
+
+  it('splits a block straddling the settle boundary exactly', async () => {
+    const r = await openOk();
+    const p = r.start(() => {});
+    workletNodes[0].feed(new Float32Array(SETTLE - 64));
+    const b = block(128, 5000); // 64 dropped, 64 kept
+    workletNodes[0].feed(b);
+    workletNodes[0].feed(new Float32Array(24000 - 64));
+    await p;
+    const out = await r.stop();
+    expect(out.preRoll.length).toBe(24000);
+    expect(Array.from(out.preRoll.subarray(0, 64))).toEqual(Array.from(b.subarray(64)));
+  });
+
+  it('stale blocks delivered right after start() do not enter preRoll', async () => {
+    const r = await openOk();
+    const p = r.start(() => {});
+    for (let i = 0; i < 20; i++) workletNodes[0].feed(new Float32Array(128).fill(0.8)); // queued leftovers
+    workletNodes[0].feed(new Float32Array(SETTLE - 20 * 128));
+    workletNodes[0].feed(new Float32Array(24000)); // silence = true pre-roll
+    await p;
+    const out = await r.stop();
+    expect(Math.max(...Array.from(out.preRoll).map(Math.abs))).toBe(0);
   });
 
   it('passes a copy of each block to onLevel', async () => {
     const r = await openOk();
     const waves: Float32Array[] = [];
     r.start((_, w) => waves.push(w));
+    feed(SETTLE);
     const b = block(128, 0);
     workletNodes[0].feed(b);
     expect(waves[0]).not.toBe(b);
@@ -274,6 +316,7 @@ describe('recording', () => {
     const r = await openOk();
     let got = -1;
     r.start((rms) => (got = rms));
+    feed(SETTLE);
     workletNodes[0].feed(new Float32Array(128).fill(0.5));
     expect(got).toBeCloseTo(0.5, 6);
     await r.stop();
@@ -282,7 +325,8 @@ describe('recording', () => {
   it('stop before preRoll completes returns partial preRoll and empty samples', async () => {
     const r = await openOk();
     r.start(() => {});
-    const fed = feed(1280);
+    feed(SETTLE);
+    const fed = feed(1280, SETTLE);
     const out = await r.stop();
     expect(out.preRoll.length).toBe(1280);
     expect(out.samples.length).toBe(0);
@@ -293,9 +337,9 @@ describe('recording', () => {
     const r = await openOk();
     for (let cycle = 0; cycle < 2; cycle++) {
       const p = r.start(() => {});
-      feed(24000);
+      feed(SETTLE + 24000);
       await p;
-      const fed = feed(48000, 24000);
+      const fed = feed(48000, SETTLE + 24000);
       const out = await r.stop();
       expect(out.preRoll.length).toBe(24000);
       expect(out.samples.length).toBe(48000);
@@ -321,12 +365,12 @@ describe('recording', () => {
     const p = r.start(() => {});
     const b1 = block(2048, 0);
     const ev = { inputBuffer: { getChannelData: () => b1 } };
-    for (let i = 0; i < 12; i++) ctxs[0].sp!.onaudioprocess!(ev); // 24576 >= 24000
+    for (let i = 0; i < 17; i++) ctxs[0].sp!.onaudioprocess!(ev); // 34816 >= 9600 + 24000
     await p;
     const out = await r.stop();
     expect(out.preRoll.length).toBe(24000);
-    expect(out.samples.length).toBe(24576 - 24000);
-    expect(out.preRoll[5]).toBe(b1[5]);
+    expect(out.samples.length).toBe(34816 - SETTLE - 24000);
+    expect(out.preRoll[5]).toBe(b1[(SETTLE % 2048) + 5]);
   });
 });
 
@@ -374,7 +418,7 @@ describe('interruption', () => {
     ctxs[0].resume.mockClear();
     const p = r.start(() => {});
     await vi.waitFor(() => expect(ctxs[0].resume).toHaveBeenCalled());
-    feed(24000);
+    feed(SETTLE + 24000);
     await p;
     const out = await r.stop();
     expect(out.preRoll.length).toBe(24000);
@@ -403,7 +447,7 @@ describe('release and discard', () => {
     expect(out.samples.length).toBe(0);
     // still usable
     const p = r.start(() => {});
-    feed(24000);
+    feed(SETTLE + 24000);
     await p;
     expect((await r.stop()).preRoll.length).toBe(24000);
   });
@@ -488,10 +532,11 @@ describe('start races and watchdog', () => {
   it('a second start() while recording returns immediately and does not re-arm', async () => {
     const r = await openOk();
     const p1 = r.start(() => {});
-    feed(1280);
+    feed(SETTLE + 1280);
     await r.start(() => {}); // resolves immediately
-    feed(24000);
+    feed(24000 - 1280);
     await p1;
+    feed(1280);
     const out = await r.stop();
     expect(out.preRoll.length).toBe(24000); // first recording's data was kept
     expect(out.samples.length).toBe(1280);
@@ -537,7 +582,7 @@ describe('start races and watchdog', () => {
       const spy = vi.fn();
       r.onInterrupted = spy;
       const p = r.start(() => {});
-      feed(24000);
+      feed(SETTLE + 24000);
       await p;
       await vi.advanceTimersByTimeAsync(2000);
       feed(128);
@@ -547,6 +592,19 @@ describe('start races and watchdog', () => {
       expect(spy).toHaveBeenCalledTimes(1);
       const out = await r.stop();
       expect(out.samples.length).toBe(0);
+    });
+
+    it('blocks dropped during settle still re-arm the watchdog', async () => {
+      const r = await openOk({ watchdogMs: 3000 });
+      const spy = vi.fn();
+      r.onInterrupted = spy;
+      r.start(() => {});
+      await vi.advanceTimersByTimeAsync(2000);
+      feed(128); // dropped (settle) but proves the stream is alive
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(spy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(spy).toHaveBeenCalledTimes(1);
     });
 
     it('stop() clears the watchdog', async () => {

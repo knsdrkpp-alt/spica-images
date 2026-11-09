@@ -3,12 +3,12 @@ import { FAKE_MIC_SCRIPT, DENIED_MIC_SCRIPT } from './fake-mic';
 
 const ORIGIN = 'http://localhost:4173';
 
-type Voice = { on(forMs?: number): void; off(): void; speechMode(v: boolean): void };
-const voice = (page: Page, call: 'on' | 'off' | 'speechMode', arg?: boolean | number) =>
+type Voice = { on(): void; off(): void; speechMode(v: boolean): void };
+const voice = (page: Page, call: 'on' | 'off' | 'speechMode', arg?: boolean) =>
   page.evaluate(([c, a]) => {
     const v = (window as unknown as { __voice: Voice }).__voice;
     if (c === 'speechMode') v.speechMode(a as boolean);
-    else if (c === 'on') v.on(a as number | undefined);
+    else if (c === 'on') v.on();
     else v.off();
   }, [call, arg] as const);
 
@@ -35,17 +35,18 @@ function trackNetwork(page: Page) {
 /** Runs one vowel + sentence set from the recording screen to the end of the sentence. */
 async function recordSet(page: Page) {
   await expect(page.getByText('どうぞ')).toBeVisible({ timeout: 20_000 });
-  await voice(page, 'on', 4_000); // auto-off after 4 s (>= 3 s voiced needed)
-  // The vowel ends by itself 5 s after 「どうぞ」 and the app starts the sentence recording
-  // immediately, so the voice must already be silent before that moment: otherwise its
-  // tail lands in the sentence's 0.5 s noise pre-roll (observed: gate says too-noisy).
+  await voice(page, 'on');
+  // Like a person who holds 「あー」 slightly past the 5 s mark: keep voicing until 300 ms
+  // after the rest prompt appears, then stop.
+  await expect(page.getByText('ひと息ついてください')).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(300);
+  await voice(page, 'off');
   await expect(page.getByText('ふだんの話し方で読み上げてください')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('どうぞ')).toBeVisible({ timeout: 20_000 });
   await voice(page, 'speechMode', true);
   await page.waitForTimeout(8_000);
-  // silence first, then stop: nothing of the speech may trail into the next recording
-  await voice(page, 'speechMode', false);
   await page.getByRole('button', { name: '終了' }).click();
+  await voice(page, 'speechMode', false);
 }
 
 async function firstSet(page: Page) {
@@ -67,7 +68,7 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await page.goto('/');
   await expect(page.getByRole('button', { name: '声を録音する' })).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
-  await page.screenshot({ path: '/tmp/voice-analyzer-start.png' });
+  await page.screenshot({ path: '/tmp/voice-analyzer-start.png', fullPage: true });
 
   await page.getByRole('button', { name: '声を録音する' }).click();
   await recordSet(page);
@@ -87,7 +88,6 @@ test('three sets drop the 参考 label and the extra-set button', async ({ page 
   await firstSet(page);
   for (let i = 0; i < 2; i++) {
     if (i === 0) await expect(page.locator('h2.headline')).toContainText('参考');
-    await page.waitForTimeout(1_500); // a person does not tap again within milliseconds
     await page.getByRole('button', { name: 'もう1セット録音する' }).click();
     await recordSet(page);
     await expect(page.locator('h2.headline')).toBeVisible({ timeout: 30_000 });

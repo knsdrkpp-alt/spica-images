@@ -14,7 +14,7 @@ export default defineConfig({
   },
   use: {
     baseURL: 'http://localhost:4173',
-    launchOptions: { executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] },
+    launchOptions: { executablePath: process.env.PW_CHROMIUM ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] },
     viewport: { width: 360, height: 740 },
     deviceScaleFactor: 1,
     trace: 'off',

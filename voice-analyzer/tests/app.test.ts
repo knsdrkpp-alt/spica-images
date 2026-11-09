@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { App, SENTENCE_MAX_SECONDS, VOWEL_SECONDS } from '../src/app';
+import { App, REST_SECONDS, SENTENCE_MAX_SECONDS, VOWEL_SECONDS } from '../src/app';
 import type { Recorder, MicError } from '../src/audio/capture';
 import norms from '../src/diagnosis/norms.json';
 import type { Norms } from '../src/diagnosis/profile';
@@ -168,7 +168,7 @@ describe('App', () => {
   it('the 終了 button ends the sentence early', async () => {
     const rec = fakeRecorder(fullSet());
     const sleep = (ms: number) =>
-      ms === VOWEL_SECONDS * 1000 ? Promise.resolve() : new Promise<void>(() => {});
+      ms === VOWEL_SECONDS * 1000 || ms === REST_SECONDS * 1000 ? Promise.resolve() : new Promise<void>(() => {});
     const { root } = setup(rec, { sleep });
     click(root, '声を録音する');
     await flush();
@@ -178,5 +178,53 @@ describe('App', () => {
     await flush();
     expect(rec.stop).toHaveBeenCalledTimes(2);
     expect(headline(root)).toContain('参考');
+  });
+
+  it('rests between the vowel and the sentence: stop -> sleep(REST) -> sentence start', async () => {
+    const rec = fakeRecorder(fullSet());
+    const order: string[] = [];
+    rec.start.mockImplementation(async () => { order.push('start'); });
+    rec.stop.mockImplementationOnce(async () => { order.push('stop'); return goodVowel(); });
+    const sleep = async (ms: number) => { order.push(`sleep:${ms}`); };
+    const { root } = setup(rec, { sleep });
+    click(root, '声を録音する');
+    await flush();
+    expect(order.slice(0, 5)).toEqual([
+      'start', `sleep:${VOWEL_SECONDS * 1000}`, 'stop', `sleep:${REST_SECONDS * 1000}`, 'start',
+    ]);
+    expect(REST_SECONDS).toBe(1.5);
+  });
+
+  it('shows the rest text (no 終了, no どうぞ) during the pause, with no sentence recording yet', async () => {
+    const rec = fakeRecorder(fullSet());
+    let releaseRest!: () => void;
+    const sleep = (ms: number) =>
+      ms === REST_SECONDS * 1000 ? new Promise<void>((res) => { releaseRest = res; }) : Promise.resolve();
+    const { root } = setup(rec, { sleep });
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).toContain('ひと息ついてください');
+    expect(root.textContent).not.toContain('どうぞ');
+    expect((root.querySelector('button') as HTMLButtonElement | null)?.hidden ?? true).toBe(true);
+    expect(rec.start).toHaveBeenCalledTimes(1);
+    releaseRest();
+    await flush();
+    expect(rec.start).toHaveBeenCalledTimes(2);
+  });
+
+  it('an interruption during the rest pause shows the retry screen and starts no sentence recording', async () => {
+    const rec = fakeRecorder(fullSet());
+    let releaseRest!: () => void;
+    const sleep = (ms: number) =>
+      ms === REST_SECONDS * 1000 ? new Promise<void>((res) => { releaseRest = res; }) : Promise.resolve();
+    const { root } = setup(rec, { sleep });
+    click(root, '声を録音する');
+    await flush();
+    rec.onInterrupted!();
+    expect(root.textContent).toContain('録音が中断されました');
+    releaseRest();
+    await flush();
+    expect(rec.start).toHaveBeenCalledTimes(1);
+    expect(root.textContent).toContain('録音が中断されました');
   });
 });

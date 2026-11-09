@@ -72,7 +72,7 @@ export function renderStart(onStart: (sex: Sex) => void): HTMLElement {
 
 export interface RecordingView {
   el: HTMLElement;
-  setPhase(p: 'vowel' | 'sentence'): void;
+  setPhase(p: 'vowel' | 'sentence' | 'rest'): void;
   setReady(ready: boolean): void;
   setWave(w: Float32Array): void;
 }
@@ -94,8 +94,13 @@ export function renderRecording(onStop: () => void): RecordingView {
   const view = h('section', { class: 'screen recording' },
     h('h1', {}, '録音中'), status, prompt, sub, svg, stop);
 
-  function setPhase(p: 'vowel' | 'sentence'): void {
-    if (p === 'vowel') {
+  function setPhase(p: 'vowel' | 'sentence' | 'rest'): void {
+    status.hidden = p === 'rest';
+    if (p === 'rest') {
+      status.textContent = '';
+      prompt.textContent = 'ひと息ついてください';
+      sub.textContent = '';
+    } else if (p === 'vowel') {
       prompt.textContent = '「あー」と、楽な声で約5秒のばしてください';
       sub.textContent = '';
     } else {
@@ -104,8 +109,8 @@ export function renderRecording(onStop: () => void): RecordingView {
     }
     stop.hidden = p !== 'sentence';
   }
-  function setReady(ready: boolean): void {
-    status.textContent = ready ? 'どうぞ' : '準備しています。静かにお待ちください';
+  function setReady(r: boolean): void {
+    status.textContent = r ? 'どうぞ' : '準備しています。静かにお待ちください';
   }
   function setWave(w: Float32Array): void {
     const n = Math.min(w.length, WAVE.w);

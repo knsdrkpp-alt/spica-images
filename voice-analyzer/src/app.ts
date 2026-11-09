@@ -13,6 +13,8 @@ import {
 
 export const VOWEL_SECONDS = 5;
 export const SENTENCE_MAX_SECONDS = 12;
+/** Pause between the vowel and the sentence so a lingering 「あー」 cannot reach the sentence's noise pre-roll. */
+export const REST_SECONDS = 1.5;
 const MAX_SETS = 3;
 
 export interface AppDeps {
@@ -133,6 +135,9 @@ export class App {
       const vowelRec = await recorder.stop();
       if (!alive()) return;
 
+      view.setPhase('rest');
+      await this.sleep(REST_SECONDS * 1000);
+      if (!alive()) return;
       view.setPhase('sentence');
       view.setReady(false);
       await recorder.start((_rms, wave) => { if (alive()) view.setWave(wave); });

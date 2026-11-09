@@ -163,6 +163,24 @@ describe('renderRecording', () => {
     r.setPhase('vowel');
     expect(stop().hidden).toBe(true);
   });
+  it('rest phase shows only the rest text', () => {
+    const r = renderRecording(noop);
+    r.setPhase('sentence');
+    r.setReady(true);
+    r.setPhase('rest');
+    const t = r.el.textContent ?? '';
+    expect(t).toContain('ひと息ついてください');
+    expect(t).not.toContain('どうぞ');
+    expect(t).not.toContain('準備しています');
+    expect(t).not.toContain('「あー」と');
+    expect(t).not.toContain(READING_TEXT);
+    expect(t).not.toContain('ふだんの話し方');
+    expect(buttonByText(r.el, '終了')!.hidden).toBe(true);
+    r.setPhase('sentence');
+    r.setReady(false);
+    expect(r.el.textContent).toContain('準備しています');
+    expect(r.el.textContent).not.toContain('ひと息');
+  });
   it('ready states', () => {
     const r = renderRecording(noop);
     r.setReady(false);
@@ -184,7 +202,7 @@ describe('renderRecording', () => {
 describe('banned-word lint over all screens', () => {
   it('finds none', () => {
     const els: HTMLElement[] = [renderStart(noop)];
-    for (const ph of ['vowel', 'sentence'] as const) {
+    for (const ph of ['vowel', 'sentence', 'rest'] as const) {
       for (const ready of [false, true]) {
         const r = renderRecording(noop);
         r.setPhase(ph);

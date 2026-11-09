@@ -4,7 +4,7 @@
  * self-contained (no imports, no closures over module scope).
  */
 export function installFakeMic(): void {
-  type Voice = { on(forMs?: number): void; off(): void; speechMode(v: boolean): void };
+  type Voice = { on(): void; off(): void; speechMode(v: boolean): void };
   const w = window as unknown as { __voice: Voice };
   let state: { ctx: AudioContext; gain: GainNode; dest: MediaStreamAudioDestinationNode } | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -37,16 +37,11 @@ export function installFakeMic(): void {
     s.gain.gain.linearRampToValueAtTime(v, t + 0.005);
   }
   function stopTimer() {
-    if (timer !== null) { clearInterval(timer); clearTimeout(timer as unknown as number); }
+    if (timer !== null) clearInterval(timer);
     timer = null;
   }
   w.__voice = {
-    on(forMs?: number) {
-      stopTimer();
-      setGain(LEVEL);
-      // page-side auto-off so a busy test runner cannot delay the switch-off
-      if (forMs !== undefined) timer = setTimeout(() => setGain(0), forMs) as unknown as ReturnType<typeof setInterval>;
-    },
+    on() { stopTimer(); setGain(LEVEL); },
     off() { stopTimer(); setGain(0); },
     speechMode(v: boolean) {
       stopTimer();
