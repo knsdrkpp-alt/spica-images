@@ -152,7 +152,7 @@
   - `type GateReason = 'too-noisy' | 'clipping' | 'too-quiet' | 'no-voice' | 'vowel-too-short' | 'sentence-too-short'`
   - `type GateWarning = 'noise-borderline' | 'low-level' | 'bluetooth-band-limited' | 'processing-on'`
   - `checkGate(input: { samples: Float32Array; sampleRate: number; preRoll: Float32Array; task: 'vowel' | 'sentence'; features: TaskFeatures; processingOn: boolean }): GateResult`
-  - `GATE`(`config.ts`): `snrOkDb = 30`、`snrRejectDb = 25`、`noiseFloorMaxDbfs = -50`、`clipRatioMax = 0.001`、`clipRunMax = 3`、`peakTargetDbfs = [-20, -3]`、`peakQuietDbfs = -30`、`vowelStableMinSeconds = 3`、`vowelFlatnessSdCentMax = 50`、`vowelLevelVarDbMax = 6`
+  - `GATE`(`config.ts`): `snrOkDb = 30`、`snrRejectDb = 20`(初版は25。実機で静かな部屋でも毎回却下されたため、20に下げた。出典のない暫定値)、`noiseFloorMaxDbfs = -50`、`clipRatioMax = 0.001`、`clipRunMax = 3`、`peakTargetDbfs = [-20, -3]`、`peakQuietDbfs = -30`、`vowelStableMinSeconds = 3`、`vowelFlatnessSdCentMax = 50`、`vowelLevelVarDbMax = 6`
 - 録音前の無音区間 `preRoll`(録音開始前の0.5秒)をノイズフロアの推定に使う。SNR = 発声区間のRMS(dBFS) − `preRoll` のRMS(dBFS)。
 
 - [ ] **Step 1: Write the failing test**: (a) 通常の合成音(peak -10 dBFS)と無音の `preRoll` で `ok: true`。(b) peak が全体の 0.2% で 0.99 以上なら `reason: 'clipping'`。(c) SNR 27 dB なら `ok: true` かつ `warnings` に `'noise-borderline'`、SNR 20 dB なら `reason: 'too-noisy'`。(d) 無音の入力で `reason: 'no-voice'`(Review Focus 2)。(e) peak -35 dBFS で `'low-level'` ではなく `reason: 'too-quiet'`。(f) 母音の `voicedSeconds` が 2 なら `'vowel-too-short'`。(g) `processingOn: true` で `warnings` に `'processing-on'`。
