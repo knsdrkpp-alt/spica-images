@@ -1,0 +1,181 @@
+import { describe, it, expect, vi } from 'vitest';
+import {
+  renderStart, renderRecording, renderResult, renderMicError, renderRetry,
+} from '../../src/ui/screens';
+import { BAND_NOTES } from '../../src/ui/band-notes';
+import { findBannedWords, type Feedback } from '../../src/diagnosis/feedback';
+import { FIXED_FOOTER, STOP_NOTICE } from '../../src/diagnosis/copy';
+import { READING_TEXT } from '../../src/diagnosis/config';
+import type { MicError } from '../../src/audio/capture';
+import type { GateReason } from '../../src/diagnosis/gate';
+
+const fb: Feedback = {
+  headline: '今回の録音では透明感タイプの傾向です',
+  tendency: '高めの帯域が相対的に多い傾向があります。',
+  strengths: ['声の輪郭が安定している傾向があります。'],
+  focus: ['澄み具合'],
+  practice: [{ title: 'ウォームアップ', minutes: 2, how: 'ハミングで楽な声を出します。' }],
+  sets: 1,
+};
+const share = new Array(12).fill(1 / 12);
+const noop = () => {};
+const MIC: MicError[] = ['denied', 'no-device', 'insecure-context', 'unsupported'];
+const REASONS: (GateReason | 'interrupted')[] = [
+  'too-noisy', 'clipping', 'too-quiet', 'no-voice', 'vowel-too-short', 'vowel-unstable', 'sentence-too-short', 'interrupted',
+];
+const count = (s: string, sub: string) => s.split(sub).length - 1;
+const result = (o: Partial<{ provisionalNorms: boolean; canRecordMore: boolean; onAgain: () => void }> = {}) =>
+  renderResult(fb, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, ...o });
+const buttonByText = (el: HTMLElement, t: string) =>
+  Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes(t));
+
+describe('renderResult', () => {
+  it('has footer and stop notice exactly once; footer is last child', () => {
+    const el = result();
+    expect(count(el.textContent!, FIXED_FOOTER)).toBe(1);
+    expect(count(el.textContent!, STOP_NOTICE)).toBe(1);
+    const last = el.lastElementChild!;
+    expect(last.tagName).toBe('FOOTER');
+    expect(last.textContent).toContain(FIXED_FOOTER);
+    expect(el.querySelector('h2')!.textContent).toBe(fb.headline);
+    expect(el.querySelectorAll('svg')).toHaveLength(2);
+    expect(el.textContent).toContain('グラフの読み方');
+  });
+  it('shows 仮の基準 only when provisional', () => {
+    expect(result({ provisionalNorms: true }).textContent).toContain('仮の基準');
+    expect(result({ provisionalNorms: false }).textContent).not.toContain('仮の基準');
+  });
+  it('record-more button follows canRecordMore', () => {
+    expect(buttonByText(result({ canRecordMore: false }), 'もう1セット')).toBeUndefined();
+    const onAgain = vi.fn();
+    buttonByText(result({ onAgain }), 'もう1セット録音する')!.click();
+    expect(onAgain).toHaveBeenCalledTimes(1);
+  });
+  it('legend buttons toggle band notes', () => {
+    const el = result();
+    const legend = el.querySelectorAll<HTMLButtonElement>('.legend button');
+    expect(legend).toHaveLength(12);
+    expect(el.textContent).toContain('音響的な裏づけは弱い、一般的な目安です');
+    expect(el.textContent).not.toContain(BAND_NOTES[3]);
+    legend[3].click();
+    expect(el.textContent).toContain(BAND_NOTES[3]);
+    expect(legend[3].getAttribute('aria-expanded')).toBe('true');
+    legend[3].click();
+    expect(el.textContent).not.toContain(BAND_NOTES[3]);
+  });
+  it('BAND_NOTES has 12 short notes', () => {
+    expect(BAND_NOTES).toHaveLength(12);
+    for (const n of BAND_NOTES) expect(n.length).toBeLessThan(60);
+  });
+});
+
+describe('renderMicError', () => {
+  it('has distinct text and a working back button', () => {
+    const texts = MIC.map((e) => renderMicError(e, noop).textContent);
+    expect(new Set(texts).size).toBe(4);
+    const onBack = vi.fn();
+    buttonByText(renderMicError('denied', onBack), '説明にもどる')!.click();
+    expect(onBack).toHaveBeenCalled();
+    expect(renderMicError('denied', noop).textContent).toContain('ブラウザの設定でマイクを許可');
+  });
+  it('uses neutral styling', () => {
+    for (const e of MIC) {
+      for (const el of Array.from(renderMicError(e, noop).querySelectorAll('*'))) {
+        const s = `${el.getAttribute('class') ?? ''} ${el.getAttribute('style') ?? ''}`;
+        expect(s).not.toMatch(/error|danger|warn|alert/i);
+      }
+    }
+  });
+});
+
+describe('renderRetry', () => {
+  it('has a distinct message per reason and a retry button', () => {
+    const texts = REASONS.map((r) => renderRetry(r, noop).textContent);
+    expect(new Set(texts).size).toBe(8);
+    const onRetry = vi.fn();
+    buttonByText(renderRetry('too-quiet', onRetry), 'もう一度録音する')!.click();
+    expect(onRetry).toHaveBeenCalled();
+  });
+});
+
+describe('renderStart', () => {
+  it('defaults to unspecified and passes the selected sex', () => {
+    const onStart = vi.fn();
+    const el = renderStart(onStart);
+    buttonByText(el, '声を録音する')!.click();
+    expect(onStart).toHaveBeenLastCalledWith('unspecified');
+    const radio = el.querySelector<HTMLInputElement>('input[type=radio][value=female]')!;
+    radio.click();
+    buttonByText(el, '声を録音する')!.click();
+    expect(onStart).toHaveBeenLastCalledWith('female');
+    el.querySelector<HTMLInputElement>('input[type=radio][value=male]')!.click();
+    buttonByText(el, '声を録音する')!.click();
+    expect(onStart).toHaveBeenLastCalledWith('male');
+  });
+  it('has required copy', () => {
+    const el = renderStart(noop);
+    expect(el.querySelector('h1')!.textContent).toBe('声のタイプチェック');
+    for (const t of ['このチェックでわかること', '音声は端末の外に送りません', '吃音', '15〜30 cm', '16歳未満']) {
+      expect(el.textContent).toContain(t);
+    }
+  });
+});
+
+describe('renderRecording', () => {
+  it('switches phases and the stop button', () => {
+    const onStop = vi.fn();
+    const r = renderRecording(onStop);
+    r.setPhase('vowel');
+    expect(r.el.textContent).toContain('「あー」と、楽な声で約5秒のばしてください');
+    expect(r.el.textContent).not.toContain(READING_TEXT);
+    const stop = () => buttonByText(r.el, '終了')!;
+    expect(stop().hidden).toBe(true);
+    r.setPhase('sentence');
+    expect(r.el.textContent).toContain(READING_TEXT);
+    expect(r.el.textContent).toContain('ふだんの話し方で読み上げてください');
+    expect(stop().hidden).toBe(false);
+    stop().click();
+    expect(onStop).toHaveBeenCalled();
+    r.setPhase('vowel');
+    expect(stop().hidden).toBe(true);
+  });
+  it('ready states', () => {
+    const r = renderRecording(noop);
+    r.setReady(false);
+    expect(r.el.textContent).toContain('準備しています。静かにお待ちください');
+    r.setReady(true);
+    expect(r.el.textContent).toContain('どうぞ');
+    expect(r.el.textContent).not.toContain('準備しています');
+  });
+  it('setWave yields finite output', () => {
+    const r = renderRecording(noop);
+    r.setWave(Float32Array.from([0, 0.5, -0.5, NaN, Infinity, 1]));
+    r.setWave(new Float32Array(0));
+    const html = r.el.innerHTML;
+    expect(html).not.toContain('NaN');
+    expect(html).not.toContain('Infinity');
+  });
+});
+
+describe('banned-word lint over all screens', () => {
+  it('finds none', () => {
+    const els: HTMLElement[] = [renderStart(noop)];
+    for (const ph of ['vowel', 'sentence'] as const) {
+      for (const ready of [false, true]) {
+        const r = renderRecording(noop);
+        r.setPhase(ph);
+        r.setReady(ready);
+        els.push(r.el);
+      }
+    }
+    for (const prov of [true, false]) for (const more of [true, false]) els.push(result({ provisionalNorms: prov, canRecordMore: more }));
+    els.push(renderResult({ ...fb, sets: 3, strengths: [], focus: [], practice: [] }, new Array(12).fill(0), {
+      provisionalNorms: false, canRecordMore: false, onAgain: noop,
+    }));
+    for (const e of MIC) els.push(renderMicError(e, noop));
+    for (const r of REASONS) els.push(renderRetry(r, noop));
+    for (const el of els) expect(findBannedWords(el.textContent ?? '')).toEqual([]);
+    // legend notes too
+    expect(findBannedWords(BAND_NOTES.join(''))).toEqual([]);
+  });
+});
