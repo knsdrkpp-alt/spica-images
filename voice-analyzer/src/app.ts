@@ -20,7 +20,7 @@ import {
 export const VOWEL_SECONDS = 6.5;
 /** Countdown granularity during the vowel. */
 const TICK_MS = 1000;
-export const SENTENCE_MAX_SECONDS = 12;
+export const SENTENCE_MAX_SECONDS = 15;
 /** Pause between the vowel and the sentence so a lingering 「あー」 cannot reach the sentence's noise pre-roll. */
 export const REST_SECONDS = 1.5;
 const MAX_SETS = 3;

@@ -22,7 +22,9 @@ describe('config', () => {
     expect(countMorae('きたかぜとたいようがちからくらべをしていました')).toBe(23);
     expect(countMorae('きょうは、がっこう。')).toBe(7);
     expect(countMorae('ラーメン')).toBe(4);
+    expect(countMorae('むかしむかしあるところにおじいさんとおばあさんがいました')).toBe(28);
     expect(countMorae(READING_KANA)).toBe(READING_MORAE);
+    expect(READING_MORAE).toBe(61);
   });
 });
 

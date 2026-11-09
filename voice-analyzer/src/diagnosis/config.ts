@@ -14,10 +14,10 @@ export const F0_RANGE_HZ = [60, 500];
 export const MID_BAND = [45, 55];
 
 export const READING_TEXT =
-  '北風と太陽が力比べをしていました。旅人の外套を脱がせた方が勝ちだと決めました。';
+  'むかしむかし、あるところに、おじいさんとおばあさんがいました。おじいさんは山へしばかりに、おばあさんは川へせんたくに行きました。';
 export const READING_KANA =
-  'きたかぜとたいようがちからくらべをしていました。たびびとのがいとうをぬがせたほうがかちだときめました。';
-export const READING_MORAE = 49;
+  'むかしむかしあるところにおじいさんとおばあさんがいましたおじいさんはやまへしばかりにおばあさんはかわへせんたくにいきました';
+export const READING_MORAE = 61;
 
 const SMALL_KANA = new Set('ゃゅょャュョ');
 const IGNORED = /[\s。、，．,.！!？?「」『』（）()・…〜~]/;

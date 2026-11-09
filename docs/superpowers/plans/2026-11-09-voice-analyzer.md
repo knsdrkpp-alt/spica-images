@@ -51,12 +51,12 @@
   - `interface SetFeatures { vowel: TaskFeatures; sentence: SentenceFeatures; flags: { processingOn: boolean } }`
   - `type VoiceType = 'clear-bright' | 'soft-bright' | 'clear-calm' | 'soft-calm'`
   - `interface Profile { brightness: number; clarity: number }`(性別内パーセンタイル、0〜100)
-- Produces(`config.ts`): `BAND_EDGES_HZ: number[]`(13個)、`BAND_COLORS: string[]`(12個、赤→紫)、`YIN_THRESHOLD = 0.12`、`F0_RANGE_HZ = [60, 500]`、`MID_BAND = [45, 55]`、`READING_TEXT: string`、`READING_MORAE = 49`、`countMorae(kana: string): number`
+- Produces(`config.ts`): `BAND_EDGES_HZ: number[]`(13個)、`BAND_COLORS: string[]`(12個、赤→紫)、`YIN_THRESHOLD = 0.12`、`F0_RANGE_HZ = [60, 500]`、`MID_BAND = [45, 55]`、`READING_TEXT: string`、`READING_MORAE = 61`、`countMorae(kana: string): number`
 - Produces(`synth.ts`): `harmonicTone(o: { f0: number; seconds: number; sampleRate: number; harmonics?: number; tiltDbPerOctave?: number; noiseDb?: number; seed?: number }): Float32Array`、`silence(seconds: number, sampleRate: number): Float32Array`
 
-- [ ] **Step 1: Write the failing test** `tests/config.test.ts`: `BAND_EDGES_HZ` が長さ13で先頭100・末尾8000・昇順、`BAND_COLORS` が長さ12。`countMorae('きたかぜとたいようがちからくらべをしていました')` が 23、`READING_TEXT` の読み(`READING_KANA` を併せてエクスポート)で `countMorae(READING_KANA) === READING_MORAE`。`harmonicTone({f0:200, seconds:1, sampleRate:16000})` の長さが 16000 でピーク絶対値が 1 以下。
+- [ ] **Step 1: Write the failing test** `tests/config.test.ts`: `BAND_EDGES_HZ` が長さ13で先頭100・末尾8000・昇順、`BAND_COLORS` が長さ12。`countMorae('むかしむかしあるところにおじいさんとおばあさんがいました')` が 28、`READING_TEXT` の読み(`READING_KANA` を併せてエクスポート)で `countMorae(READING_KANA) === READING_MORAE`。`harmonicTone({f0:200, seconds:1, sampleRate:16000})` の長さが 16000 でピーク絶対値が 1 以下。
 - [ ] **Step 2: Run** `cd voice-analyzer && npx vitest run tests/config.test.ts` — Expected: FAIL(モジュールが無い)。
-- [ ] **Step 3: Implement** 上記ファイルを作る。`READING_TEXT` は「北風と太陽が力比べをしていました。旅人の外套を脱がせた方が勝ちだと決めました。」、`READING_KANA` はその読み。`countMorae` は、小書きの「ゃゅょ」を数えず、「っ」「ー」「ん」を1モーラとして数える。`harmonicTone` は seed 固定の疑似乱数でノイズを混ぜる。`package.json` に scripts: `dev`、`build`、`test`(vitest)、`e2e`(playwright)。devDependencies は vite、typescript、vitest、jsdom、@playwright/test。
+- [ ] **Step 3: Implement** 上記ファイルを作る。`READING_TEXT` は「むかしむかし、あるところに、おじいさんとおばあさんがいました。おじいさんは山へしばかりに、おばあさんは川へせんたくに行きました。」(「桃太郎」の冒頭)、`READING_KANA` はその読み。`countMorae` は、小書きの「ゃゅょ」を数えず、「っ」「ー」「ん」を1モーラとして数える。`harmonicTone` は seed 固定の疑似乱数でノイズを混ぜる。`package.json` に scripts: `dev`、`build`、`test`(vitest)、`e2e`(playwright)。devDependencies は vite、typescript、vitest、jsdom、@playwright/test。
 - [ ] **Step 4: Run** 同コマンド — Expected: PASS。`npx tsc --noEmit` がエラー0。
 - [ ] **Step 5: Commit** `git add voice-analyzer && git commit -m "feat: scaffold voice-analyzer with types, config and synth helpers"`
 
@@ -265,7 +265,7 @@
 - Consumes: Task 5〜10 のすべて
 - Produces:
   - `class App { constructor(root: HTMLElement, deps: { openRecorder: () => Promise<Recorder | { error: MicError }>; norms: Norms }); start(): void }`
-  - 1セットの流れ: 母音(約5秒、自動停止)→ 文(`READING_TEXT` を表示、最大12秒、「終了」ボタンで早く止められる)→ `extractVowel`、`extractSentence` → `checkGate`(母音と文の両方)→ いずれかが失敗なら `renderRetry`、成功なら `SetFeatures` を蓄積 → `classify` と `buildFeedback` → `renderResult`。
+  - 1セットの流れ: 母音(約5秒、自動停止)→ 文(`READING_TEXT` を表示、最大15秒、「終了」ボタンで早く止められる)→ `extractVowel`、`extractSentence` → `checkGate`(母音と文の両方)→ いずれかが失敗なら `renderRetry`、成功なら `SetFeatures` を蓄積 → `classify` と `buildFeedback` → `renderResult`。
   - 2セット目以降は、「もう1セット録音する」で追加(最大3セット)。結果は蓄積した全セットの中央値に更新し、`sets` を渡す。
   - `Recorder.onInterrupted` が呼ばれたら、そのセットを破棄して `renderRetry('no-voice')` ではなく、中断用の案内(再録音)を出す。
 
@@ -315,7 +315,7 @@
 - **Spec coverage**: 第2節(画面、3セット、固定フッター)= Task 10、11。第3節(測定項目、表示しない指標)= Task 2〜5、Global Constraints。第4節(プロファイル、パーセンタイル、中間、中央値)= Task 7。第5節(フィードバック、表現ルール、固定フッター、中止の案内)= Task 8。第6節(AudioWorklet、実測サンプルレート、ideal指定と事後検証、中断、YIN、CPPS、HNR)= Task 3、4、9。第7節(品質ゲート)= Task 6。第8節(エラー処理)= Task 9、10、11。第9節(単体、Parselmouth、通し、実機)= Task 1〜13。第10節(プライバシー)= Task 12 のネットワーク検査と Global Constraints。弁護士確認と一次資料の確認は、実装外の作業で、計画には含まない。
 - **未解決の点(要確認)**:
   - 設計書の第5節は、動的な文言で「悪化」を避けつつ、中止の案内に「かすれの悪化」を含めている。本計画は、中止の案内と固定フッターを許可文字列として検査から除外した。
-  - 読み上げ文(`READING_TEXT`、49モーラ)と、`norms.json` の初期値(合成音から生成)は、設計書に指定がないため、本計画で決めた。実録音が集まったら置き換える。
+  - 読み上げ文(`READING_TEXT`、61モーラ)と、`norms.json` の初期値(合成音から生成)は、設計書に指定がないため、本計画で決めた。実録音が集まったら置き換える。
   - Task 13 の実録音(20〜50本)は、まだ手元に無い。
 - **Type consistency**: `SetFeatures`、`Profile`、`Classification`、`Feedback`、`GateResult`、`MicError` は、定義した Task と使う Task で名前が一致している。
 - **Proportion**: 設計書より長いが、コードの本体は書かず、署名、テスト、数値だけを置いた。

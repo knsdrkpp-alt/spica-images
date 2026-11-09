@@ -107,7 +107,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 describe('App', () => {
   it('exports timing constants', () => {
     expect(VOWEL_SECONDS).toBe(6.5);
-    expect(SENTENCE_MAX_SECONDS).toBe(12);
+    expect(SENTENCE_MAX_SECONDS).toBe(15);
   });
 
   it('(a) one full set shows a provisional result with the mic closed', async () => {
