@@ -1,4 +1,10 @@
+import { existsSync } from 'node:fs';
 import { defineConfig } from '@playwright/test';
+
+// PW_CHROMIUM overrides; otherwise use the sandbox's preinstalled Chromium when it exists, and
+// Playwright's own bundled browser (`npx playwright install chromium`) everywhere else.
+const SANDBOX_CHROMIUM = '/opt/pw-browsers/chromium';
+const executablePath = process.env.PW_CHROMIUM ?? (existsSync(SANDBOX_CHROMIUM) ? SANDBOX_CHROMIUM : undefined);
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -14,7 +20,7 @@ export default defineConfig({
   },
   use: {
     baseURL: 'http://localhost:4173',
-    launchOptions: { executablePath: process.env.PW_CHROMIUM ?? '/opt/pw-browsers/chromium', args: ['--no-sandbox'] },
+    launchOptions: { ...(executablePath ? { executablePath } : {}), args: ['--no-sandbox'] },
     viewport: { width: 360, height: 740 },
     deviceScaleFactor: 1,
     trace: 'off',

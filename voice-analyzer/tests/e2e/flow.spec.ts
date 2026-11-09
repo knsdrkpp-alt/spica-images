@@ -1,3 +1,6 @@
+import { createServer, type Server } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, join, normalize } from 'node:path';
 import { test, expect, type Page } from '@playwright/test';
 import { FAKE_MIC_SCRIPT, DENIED_MIC_SCRIPT } from './fake-mic';
 
@@ -75,12 +78,12 @@ test.beforeEach(async ({ page }) => {
 const noHScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
-test('full flow, no network traffic beyond GET of own origin, 360px layout', async ({ page }) => {
+test('full flow, no network traffic beyond GET of own origin, 360px layout', async ({ page }, testInfo) => {
   const net = trackNetwork(page);
   await page.goto('/');
   await expect(page.getByRole('button', { name: '声を録音する' })).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
-  await page.screenshot({ path: '/tmp/voice-analyzer-start.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('start.png'), fullPage: true });
 
   await page.getByRole('button', { name: '声を録音する' }).click();
   await recordSet(page);
@@ -95,7 +98,7 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await expect(page.getByText(/声の高さ:約 \d+ Hz/)).toBeVisible();
   await expect(page.getByText('週3〜5日、2〜4週ほど続けてから')).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
-  await page.screenshot({ path: '/tmp/voice-analyzer-result.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('result.png'), fullPage: true });
 
   expect(net.count()).toBeGreaterThan(0);
   expect(net.violations()).toEqual([]);
@@ -137,4 +140,32 @@ test('self-test: the network tracker flags a POST and a foreign origin', async (
   expect(net.violations().some((v) => v.startsWith('POST'))).toBe(true);
   await page.evaluate(() => fetch('https://example.com/x', { mode: 'no-cors' }).catch(() => {}));
   expect(net.violations().some((v) => v.startsWith('foreign'))).toBe(true);
+});
+
+test('works from a sub-path (static hosting such as GitHub Pages /<repo>/)', async ({ page }) => {
+  // Serves the dist/ built by the webServer under /repo/ only, like a project page.
+  const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+  const server: Server = createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://x').pathname;
+    if (!path.startsWith('/repo/')) { res.writeHead(404).end(); return; }
+    const file = normalize(join('dist', path.slice('/repo/'.length) || 'index.html'));
+    if (!file.startsWith('dist')) { res.writeHead(403).end(); return; }
+    readFile(file).then(
+      (body) => res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' }).end(body),
+      () => res.writeHead(404).end(),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(4175, resolve));
+  try {
+    const failed: string[] = [];
+    page.on('response', (r) => { if (r.status() >= 400) failed.push(`${r.status()} ${r.url()}`); });
+    await page.goto('http://localhost:4175/repo/');
+    await expect(page.getByRole('button', { name: '声を録音する' })).toBeVisible(); // blank page without base: './'
+    await page.getByRole('button', { name: '声を録音する' }).click();
+    await recordSet(page); // needs the AudioWorklet module to load from ./assets/
+    await expect(page.locator('h2.headline')).toContainText('参考', { timeout: 30_000 });
+    expect(failed).toEqual([]);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
