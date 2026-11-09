@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hzToSemitone, trackPitch, voicedMask } from '../../src/dsp/pitch';
-import { longTermSpectrum, spectrumFrameLayout } from '../../src/dsp/spectrum';
+import { longTermSpectrum, spectrumFrameCount } from '../../src/dsp/spectrum';
 import { harmonicTone, silence } from '../helpers/synth';
 
 function voicedValues(f0: Array<number | null>): number[] {
@@ -82,11 +82,20 @@ describe('trackPitch', () => {
     for (const i of [30, 36, 38, 42, 46, 60]) expect(Math.abs((t.f0[i] ?? 0) - 200)).toBeLessThanOrEqual(2);
   });
 
+  it('tracks 15 s of 48 kHz audio quickly', () => {
+    const x = harmonicTone({ f0: 200, seconds: 15, sampleRate: 48000, harmonics: 8 });
+    const t0 = performance.now();
+    const t = trackPitch(x, 48000);
+    const ms = performance.now() - t0;
+    expect(ms).toBeLessThan(1500);
+    expect(Math.abs(median(voicedValues(t.f0)) - 200)).toBeLessThanOrEqual(2);
+  });
+
   it('does not throw on signals shorter than a frame', () => {
     const t = trackPitch(new Float32Array(100), 16000);
-    expect(t.f0.every((v) => v === null)).toBe(true);
-    expect(t.f0.length).toBe(t.clarity.length);
-    expect(() => trackPitch(new Float32Array(0), 16000)).not.toThrow();
+    expect(t.f0).toEqual([]);
+    expect(t.clarity).toEqual([]);
+    expect(trackPitch(new Float32Array(0), 16000).f0).toEqual([]);
   });
 });
 
@@ -95,8 +104,7 @@ describe('voicedMask', () => {
     const sr = 16000;
     const x = harmonicTone({ f0: 200, seconds: 1, sampleRate: sr, harmonics: 8 });
     const mask = voicedMask(trackPitch(x, sr), x.length, sr);
-    const { frameLength, hop } = spectrumFrameLayout(sr);
-    expect(mask.length).toBe(Math.floor((x.length - frameLength) / hop) + 1);
+    expect(mask.length).toBe(spectrumFrameCount(x.length, sr));
     expect(mask.filter(Boolean).length).toBeGreaterThan(mask.length * 0.9);
     // usable with longTermSpectrum
     expect(() => longTermSpectrum(x, sr, mask)).not.toThrow();

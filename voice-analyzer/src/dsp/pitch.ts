@@ -1,6 +1,6 @@
 import { F0_RANGE_HZ, YIN_THRESHOLD } from '../diagnosis/config';
 import type { PitchTrack } from '../types';
-import { spectrumFrameLayout } from './spectrum';
+import { spectrumFrameCount, spectrumFrameLayout } from './spectrum';
 
 const FRAME_SECONDS = 0.04;
 const HOP_SECONDS = 0.01;
@@ -104,7 +104,39 @@ function medianSmooth(f0: Array<number | null>): Array<number | null> {
   });
 }
 
-export function trackPitch(samples: Float32Array, sampleRate: number): PitchTrack {
+const TARGET_RATE = 16000;
+
+/** Low-pass (windowed sinc, cutoff 0.45 of the new Nyquist) and keep every `factor`-th sample. */
+function decimate(x: Float32Array, factor: number): Float32Array {
+  if (factor === 1) return x;
+  const half = 4 * factor;
+  const fc = 0.45 / factor; // cycles per input sample
+  const taps = new Float64Array(2 * half + 1);
+  let sum = 0;
+  for (let k = -half; k <= half; k++) {
+    const sinc = k === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * k) / (Math.PI * k);
+    const win = 0.5 + 0.5 * Math.cos((Math.PI * k) / (half + 1));
+    taps[k + half] = sinc * win;
+    sum += taps[k + half];
+  }
+  for (let k = 0; k < taps.length; k++) taps[k] /= sum;
+  const out = new Float32Array(Math.floor(x.length / factor));
+  for (let i = 0; i < out.length; i++) {
+    const c = i * factor;
+    let acc = 0;
+    for (let k = -half; k <= half; k++) {
+      const idx = c + k;
+      if (idx >= 0 && idx < x.length) acc += taps[k + half] * x[idx];
+    }
+    out[i] = acc;
+  }
+  return out;
+}
+
+export function trackPitch(input: Float32Array, inputRate: number): PitchTrack {
+  const factor = Math.max(1, Math.floor(inputRate / TARGET_RATE));
+  const samples = decimate(input, factor);
+  const sampleRate = inputRate / factor;
   const frameLen = Math.round(FRAME_SECONDS * sampleRate);
   const hop = Math.round(HOP_SECONDS * sampleRate);
   const tauMin = Math.max(2, Math.floor(sampleRate / F0_RANGE_HZ[1]));
@@ -120,7 +152,7 @@ export function trackPitch(samples: Float32Array, sampleRate: number): PitchTrac
     raw.push(r.f0);
     clarity.push(r.clarity);
   }
-  return { hopSeconds: HOP_SECONDS, f0: medianSmooth(rejectOctaveJumps(raw)), clarity };
+  return { hopSeconds: hop / sampleRate, f0: medianSmooth(rejectOctaveJumps(raw)), clarity };
 }
 
 /**
@@ -129,7 +161,7 @@ export function trackPitch(samples: Float32Array, sampleRate: number): PitchTrac
  */
 export function voicedMask(track: PitchTrack, totalSamples: number, sampleRate: number): boolean[] {
   const { frameLength, hop } = spectrumFrameLayout(sampleRate);
-  const frameCount = totalSamples < frameLength ? 1 : Math.floor((totalSamples - frameLength) / hop) + 1;
+  const frameCount = spectrumFrameCount(totalSamples, sampleRate);
   const pitchFrame = FRAME_SECONDS;
   const mask: boolean[] = [];
   for (let i = 0; i < frameCount; i++) {

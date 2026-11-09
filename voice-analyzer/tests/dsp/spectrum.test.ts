@@ -125,3 +125,15 @@ describe('spectrum', () => {
     expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 6);
   });
 });
+
+describe('spectrumFrameCount', () => {
+  it('is 1 for empty/short input and counts hops otherwise', async () => {
+    const { spectrumFrameCount, spectrumFrameLayout } = await import('../../src/dsp/spectrum');
+    const { frameLength, hop } = spectrumFrameLayout(16000);
+    expect(spectrumFrameCount(0, 16000)).toBe(1);
+    expect(spectrumFrameCount(frameLength - 1, 16000)).toBe(1);
+    expect(spectrumFrameCount(frameLength, 16000)).toBe(1);
+    expect(spectrumFrameCount(frameLength + hop, 16000)).toBe(2);
+    expect(spectrumFrameCount(16000, 16000)).toBe(Math.floor((16000 - frameLength) / hop) + 1);
+  });
+});

@@ -20,6 +20,12 @@ export function spectrumFrameLayout(sampleRate: number): { frameLength: number; 
   return { frameLength, hop: frameLength / 2 };
 }
 
+/** Number of analysis frames longTermSpectrum uses for a signal (at least 1; short input is zero-padded). */
+export function spectrumFrameCount(totalSamples: number, sampleRate: number): number {
+  const { frameLength, hop } = spectrumFrameLayout(sampleRate);
+  return totalSamples < frameLength ? 1 : Math.floor((totalSamples - frameLength) / hop) + 1;
+}
+
 /** Mean Hann-windowed power spectrum over (voiced) frames. */
 export function longTermSpectrum(
   samples: Float32Array,
@@ -37,8 +43,7 @@ export function longTermSpectrum(
     window[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / frameLength);
   }
 
-  const frameCount =
-    samples.length < frameLength ? 1 : Math.floor((samples.length - frameLength) / hop) + 1;
+  const frameCount = spectrumFrameCount(samples.length, sampleRate);
   const re = new Float32Array(frameLength);
   const im = new Float32Array(frameLength);
   let used = 0;
