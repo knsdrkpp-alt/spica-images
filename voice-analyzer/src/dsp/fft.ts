@@ -1,5 +1,5 @@
 /** In-place radix-2 FFT. Length of both arrays must be a power of two. */
-export function fft(re: Float32Array, im: Float32Array): void {
+export function fft(re: Float32Array | Float64Array, im: Float32Array | Float64Array): void {
   const n = re.length;
   if (n !== im.length) throw new Error('fft: re and im lengths differ');
   if (n < 1 || (n & (n - 1)) !== 0) throw new Error('fft: length must be a power of two');

@@ -191,6 +191,30 @@
       "cppsTrendToEnd": 31.73783970576448,
       "f0MedianHz": 199.99925760746328,
       "hnrDb": 129.93643574457127
+    },
+    "f300_n25_t12_sr16k": {
+      "cpps": 12.931702632717947,
+      "cppsTrendToEnd": 12.83978639823363,
+      "f0MedianHz": 299.993874817074,
+      "hnrDb": 25.35641199778814
+    },
+    "f300_n25_t12_sr48k": {
+      "cpps": 14.472970261494712,
+      "cppsTrendToEnd": 14.33504315311416,
+      "f0MedianHz": 300.00164204649184,
+      "hnrDb": 25.215326005521103
+    },
+    "f300_nnone_t12_sr16k": {
+      "cpps": 25.436288720604438,
+      "cppsTrendToEnd": 26.010841052680984,
+      "f0MedianHz": 300.0001934349834,
+      "hnrDb": 86.52161643927727
+    },
+    "f300_nnone_t12_sr48k": {
+      "cpps": 28.396838689318447,
+      "cppsTrendToEnd": 28.411399269936815,
+      "f0MedianHz": 299.99699598681326,
+      "hnrDb": 139.29283904926228
     }
   },
   "note": "Synthetic harmonic voices only (tests/golden/cases.ts); no human recordings.",

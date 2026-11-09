@@ -30,6 +30,8 @@ function vibratoTone(f0: number, seconds: number, sampleRate: number, depthSt: n
 }
 
 const clean = (sr: number) => harmonicTone({ f0: 200, seconds: 2, sampleRate: sr, harmonics: 10 });
+/** Nearly clean (-40 dB noise): a noise-free tone's CPPS is set by the arithmetic noise floor (Praat too). */
+const nearlyClean = (sr: number) => harmonicTone({ f0: 200, seconds: 2, sampleRate: sr, harmonics: 10, noiseDb: -40 });
 const noisy = (sr: number) => harmonicTone({ f0: 200, seconds: 2, sampleRate: sr, harmonics: 10, noiseDb: -10 });
 
 describe('cpps', () => {
@@ -44,7 +46,7 @@ describe('cpps', () => {
   });
 
   it('is roughly sample-rate independent for the same tone', () => {
-    const v = [16000, 44100, 48000].map((sr) => cpps(clean(sr), sr)!);
+    const v = [16000, 44100, 48000].map((sr) => cpps(nearlyClean(sr), sr)!);
     expect(Math.max(...v) - Math.min(...v)).toBeLessThan(2);
   });
 

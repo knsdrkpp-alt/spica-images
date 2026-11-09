@@ -2,30 +2,36 @@
  * Voice clarity measures: CPPS, HNR, H1-H2 and pitch stability.
  *
  * Parameters were first written from memory of the Praat recipes (manual not reachable). Task 13
- * measured CPPS/HNR/F0 against Praat 6.1.38 via Parselmouth 0.4.7 on 32 SYNTHETIC voices
+ * measured CPPS/HNR/F0 against Praat 6.1.38 via Parselmouth 0.4.7 on 36 SYNTHETIC voices
  * (tests/golden; no human recordings yet) and aligned CPPS (window, grid, robust fit) to it.
  *
  * CPPS (after Praat `To PowerCepstrogram` 60 Hz/0.002 s/5000 Hz/50 Hz + `Get CPPS` defaults)
+ *   - decimation: only 0 .. 5 kHz is used, so the input is low-passed (Blackman sinc at the new
+ *     Nyquist, src/dsp/resample.ts) and decimated by floor(fs / 10 kHz) first: 48 k -> 12 k,
+ *     44.1 k -> 11.025 k, 16 k unchanged. Speed only (15 s at 48 kHz: ~1.0 s -> ~0.55 s on the dev
+ *     machine); golden noisy-case deltas unchanged.
  *   - pre-emphasis: first order, from 50 Hz (y[n] = x[n] - a·x[n-1], a = exp(-2π·50/fs))  [Praat default 50 Hz]
  *   - frames: Gaussian window exp(-12·(t/T - 1/2)²) (edges subtracted, renormalized), physical
  *     length T = 100 ms (= 2 · 3 / 60 Hz pitch floor, Praat style), hop 10 ms. Praat's time step is
  *     2 ms; measured effect on Praat's own CPPS ≈ 0.1 dB on the golden set, so 10 ms is kept for speed.
  *     (Task 13: was 40 ms Hann; this window alone cut the golden worst |Δ| from 9.35 to 4.13 dB.)
  *   - spectrum: |X|², FFT zero-padded to 2× the next power of two (two real frames share one
- *     complex FFT for speed; float32, which shifts noise-free synthetic tones by up to ~1 dB but
- *     not the noisy golden cases), power-averaged over the FFT bins
+ *     complex FFT for speed, in float64 so the pair does not leak into each other's floor; float32
+ *     moved noise-free synthetic tones by up to ~1 dB), power-averaged over the FFT bins
  *     falling in each cell of a fixed grid of 513 points over 0 .. 5000 Hz (or 0 .. fs/2 if lower),
  *     then 10·log10. This stands in for Praat's resampling to 2 × 5000 Hz and makes the cepstrum
  *     sample-rate independent; quefrency step = 1 / (2·5000) s = 0.1 ms.
  *   - cepstrum: inverse FFT of the symmetric dB spectrum (1024 points), power cepstrum c².
- *   - smoothing (on linear c² values): time ±1 frame (≈ 20 ms window at 10 ms hop, over kept
- *     frames only) then quefrency ±2 bins (0.5 ms window). [Praat defaults 0.02 s / 0.0005 s;
+ *   - smoothing (on linear c² values): time = mean of 3 consecutive frames (±1 hop; frame centres
+ *     span 20 ms, i.e. 30 ms of hops; each frame is 100 ms long; kept frames only), then quefrency
+ *     = mean of 5 bins (±2 bins; 0.5 ms of bins). [Praat defaults 0.02 s / 0.0005 s;
  *     smoothing dB values instead was measured worse vs Praat (golden worst |Δ| 11.2 dB)]
  *   - trend: robust straight line of cepstrum dB vs quefrency over 1 ms .. 50 ms: "incomplete"
  *     Theil-Sen (slope = median of (y[i+n/2]-y[i])/(x[i+n/2]-x[i]), intercept = median residual),
  *     matching Praat's "Robust" fit method closely on the golden set. [Praat range 0.001-0.05 s]
  *   - peak: maximum within quefrency 1/500 .. 1/60 s (brief, app F0 range; Praat default 60-330 Hz,
- *     which changed the golden results by < 0.02 dB because all golden F0s are <= 200 Hz),
+ *     which changed the first 32 golden results by < 0.02 dB; every golden F0 is below 330 Hz, so
+ *     the deviation for voices above 330 Hz is untested),
  *     parabolic interpolation in dB; CPP = peak dB - trend dB at the peak quefrency.
  *   - CPPS = mean CPP over frames. With `removeSilence`, frames whose RMS is more than 35 dB
  *     below the loudest frame are dropped before smoothing and averaging.
@@ -51,12 +57,15 @@
  */
 import type { PitchTrack } from '../types';
 import { fft } from './fft';
+import { decimateKeepingBand } from './resample';
 import { hzToSemitone } from './pitch';
 
 const FRAME_SECONDS = 0.04;
 const HOP_SECONDS = 0.01;
 /** CPPS analysis window: Gaussian, physical length 2 · 3 / 60 Hz (Praat style). */
 const CPPS_FRAME_SECONDS = 0.1;
+/** CPPS only uses 0 .. 5 kHz: decimate by floor(fs / 10 kHz) first (48 k -> 12 k, 44.1 k -> 11.025 k). */
+const CPPS_MIN_RATE = 2 * 5000;
 const MIN_VOICED_FRAMES = 10;
 
 const PRE_EMPHASIS_HZ = 50;
@@ -120,10 +129,13 @@ function parabolic(a: number, b: number, c: number): { offset: number; value: nu
 }
 
 export function cpps(
-  samples: Float32Array,
-  sampleRate: number,
+  input: Float32Array,
+  inputRate: number,
   opts: { removeSilence?: boolean } = {},
 ): number | null {
+  const factor = Math.max(1, Math.floor(inputRate / CPPS_MIN_RATE));
+  const samples = decimateKeepingBand(input, factor);
+  const sampleRate = inputRate / factor;
   const frameLen = Math.round(CPPS_FRAME_SECONDS * sampleRate);
   const hop = Math.round(HOP_SECONDS * sampleRate);
   if (frameLen < 2 || samples.length < frameLen) return null;
@@ -159,8 +171,9 @@ export function cpps(
   const halfCep = GRID_HALF; // quefrency bins 0 .. GRID_HALF
   const topBin = Math.min(nfft / 2, Math.ceil(maxHz / binHz) + 1);
 
-  const re = new Float32Array(nfft);
-  const im = new Float32Array(nfft);
+  // float64: frames share an FFT in pairs; float32 cross-talk set the floor of noise-free tones
+  const re = new Float64Array(nfft);
+  const im = new Float64Array(nfft);
   const pw = new Float64Array(topBin + 1);
   // FFT bin range [cellLo[g], cellHi[g]] averaged into grid point g
   const cellLo = new Int32Array(GRID_HALF + 1);

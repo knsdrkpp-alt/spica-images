@@ -18,20 +18,32 @@
 - iPhone: Mac の Safari →「開発」メニュー → 端末名 → 対象ページ
 - Android: PC の Chrome で `chrome://inspect` → 対象ページの「inspect」
 
+アプリと同じ指定(加工を切るよう `ideal: false` で頼む)でマイクを開き、ブラウザが実際に何を返したかを見る。
+`{ audio: true }` で開くと既定値(たいてい true)が返るだけで、アプリの状態は分からないので使わない。
 コンソールで次を実行し、出力をそのまま表に貼る:
 ```js
-navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getAudioTracks()[0].getSettings())
+navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: { ideal: false }, noiseSuppression: { ideal: false }, autoGainControl: { ideal: false } } }).then((s) => { const t = s.getAudioTracks()[0]; console.log(t.label, t.getSettings()); t.stop(); })
 ```
-- [ ] `echoCancellation` が false
-- [ ] `noiseSuppression` が false
-- [ ] `autoGainControl` が false(項目が無い場合は「無し」と書く)
-- [ ] `new AudioContext().sampleRate` の値(44100 か 48000 か)を書き留めた
+`ideal` は「できれば」の指定なので、ブラウザが従わないことがある(iPhone Safari は従わない、または項目が無いことがある)。
+true が返っても不合格ではない。従ったかどうかを記録する(アプリはこの値を見て、加工が入った録音として扱う)。
+- [ ] `echoCancellation` の値を書いた(false なら要求どおり)
+- [ ] `noiseSuppression` の値を書いた(false なら要求どおり)
+- [ ] `autoGainControl` の値を書いた(項目が無い場合は「無し」)
+- [ ] Bluetooth イヤホンをつないだ状態でも同じコマンドを実行し、`label` と値を書いた
+
+サンプルレート: アプリが使うのは、録音開始時にアプリが作る AudioContext のレート。外からは直接読めないので、
+同じ状態(同じマイク、同じイヤホン接続)でコンソールから作った値を近似として書く:
+```js
+new (window.AudioContext || window.webkitAudioContext)().sampleRate
+```
+- [ ] 内蔵マイクでの値(44100 か 48000 か)を表に書いた
+- [ ] Bluetooth イヤホン接続中の値も書いた(16000 や 8000 などに変わることがある)
 
 ## 3. 録音中の中断
 - [ ] 録音中に画面を消す → 録音は破棄され、「録音が中断されました」が出る
 - [ ] 録音中に別のアプリへ切り替えて戻る → 同じく破棄され、「録音が中断されました」が出る
 - [ ] 録音中に電話の着信(または通知音、アラーム)→ 何が起きたかを書く(破棄されるか、結果が出てしまうか)
-- [ ] 中断の後、もう一度録音すると正常に進む
+- [ ] 中断の後、もう一度録音すると問題なく進む
 
 ## 4. マイクと環境
 - [ ] Bluetooth イヤホンのマイクで録音 → 何が起きたかを書く(狭帯域になり、警告が出るか、値が大きく変わるか)
@@ -55,7 +67,7 @@ navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getAudioTrack
 
 | 端末 | OS | ブラウザ | sampleRate | echoCancellation / noiseSuppression / autoGainControl | 備考 |
 |---|---|---|---|---|---|
-| 例: iPhone 13 | iOS 18.1 | Safari | 48000 | false / false / 無し | BT イヤホンで警告が出た |
+| 例(書き方の見本、実測値ではない): iPhone 〇〇 | iOS 〇〇 | Safari | 48000(BT: 16000) | true / true / 無し(要求に従わず) | BT イヤホンで〇〇の警告 |
 | | | | | | |
 | | | | | | |
 | | | | | | |

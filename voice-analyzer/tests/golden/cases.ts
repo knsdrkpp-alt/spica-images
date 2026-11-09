@@ -39,6 +39,14 @@ function build(): GoldenCase[] {
             },
           });
         }
+  // Higher voice (Task 13 fix round 1): F0 above Praat's 330 Hz CPPS peak-search ceiling is not
+  // reached here, but 300 Hz exercises a voice near it; clean and -25 dB, tilt -12 dB/oct.
+  for (const noiseDb of [undefined, -25])
+    for (const sampleRate of RATES) {
+      seed++;
+      const id = `f300_n${noiseDb === undefined ? 'none' : -noiseDb}_t12_sr${sampleRate / 1000}k`;
+      out.push({ id, params: { f0: 300, seconds: 4, sampleRate, harmonics: 12, tiltDbPerOctave: -12, noiseDb, seed } });
+    }
   return out;
 }
 
