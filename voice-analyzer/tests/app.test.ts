@@ -396,6 +396,29 @@ describe('App', () => {
     expect(root.textContent).toContain('最初にもどる');
   });
 
+  it('a too-noisy take shows the measured values on the retry screen (first failing task wins)', async () => {
+    const noisy = (): Rec => {
+      const v = goodVowel();
+      let a = 5;
+      const pre = new Float32Array(SR / 2);
+      for (let i = 0; i < pre.length; i++) {
+        a = (Math.imul(a, 1664525) + 1013904223) >>> 0;
+        pre[i] = (a / 4294967296 - 0.5) * 0.2;
+      }
+      return { samples: v.samples, preRoll: pre };
+    };
+    const rec = fakeRecorder([noisy, goodSentence]);
+    const { root } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).toContain('周りの音が大きいようです');
+    const d = root.querySelector('.retry-detail');
+    expect(d).not.toBeNull();
+    expect(d!.textContent).toMatch(/録音前の静けさとの差は約 -?\d+ dB でした/);
+    expect(d!.textContent).toMatch(/約 -\d+ dBFS/);
+    expect(d!.textContent).not.toMatch(/NaN|null|undefined/);
+  });
+
   it('result notices: none for a clean set; processing-on and borderline noise each add one neutral notice', async () => {
     let rec = fakeRecorder(fullSet());
     let { root } = setup(rec);

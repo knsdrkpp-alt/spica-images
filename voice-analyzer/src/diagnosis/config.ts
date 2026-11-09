@@ -36,8 +36,12 @@ export function countMorae(kana: string): number {
 export const GATE = {
   /** SNR (dB) at or above which no noise warning is raised. */
   snrOkDb: 30,
-  /** SNR (dB) below which the recording is rejected as too noisy. */
-  snrRejectDb: 25,
+  /**
+   * SNR (dB) below which the recording is rejected as too noisy. Provisional (no cited source):
+   * lowered from 25 after a real-device report that a quiet room was rejected every time;
+   * 20 to 30 dB is accepted with a warning. Tune with real recordings.
+   */
+  snrRejectDb: 20,
   /** Pre-roll noise floor (dBFS) above which a 'noise-borderline' warning is raised. */
   noiseFloorMaxDbfs: -50,
   /** Maximum fraction of samples with |x| >= 0.99. */

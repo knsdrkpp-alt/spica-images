@@ -1,7 +1,7 @@
-import { BAND_COLORS, BAND_EDGES_HZ, READING_TEXT } from '../diagnosis/config';
+import { BAND_COLORS, BAND_EDGES_HZ, GATE, READING_TEXT } from '../diagnosis/config';
 import { FIXED_FOOTER, MULTI_SET_NOTE, PRACTICE_CADENCE, STOP_NOTICE } from '../diagnosis/copy';
 import type { Feedback } from '../diagnosis/feedback';
-import type { GateReason } from '../diagnosis/gate';
+import type { GateDetail, GateReason } from '../diagnosis/gate';
 import type { MicError } from '../audio/capture';
 import type { Sex } from '../types';
 import { BAND_NOTES } from './band-notes';
@@ -331,13 +331,33 @@ const RETRY_COPY: Record<GateReason | 'interrupted', string> = {
   interrupted: '録音が中断されました。もう一度録音してください。',
 };
 
+/** One neutral line with the measured levels, for 'too-noisy' and 'too-quiet' only. */
+function retryDetailText(reason: GateReason | 'interrupted', d: GateDetail | undefined): string | null {
+  if (!d) return null;
+  const parts: string[] = [];
+  const fin = (v: number | null): v is number => v !== null && Number.isFinite(v);
+  if (reason === 'too-noisy') {
+    if (fin(d.snrDb)) parts.push(`録音前の静けさとの差は約 ${Math.round(d.snrDb)} dB でした(${GATE.snrRejectDb} dB 以上が目安)。`);
+    if (fin(d.noiseFloorDbfs)) parts.push(`録音前の音の大きさは約 ${Math.round(d.noiseFloorDbfs)} dBFS でした。`);
+  } else if (reason === 'too-quiet') {
+    if (fin(d.peakDbfs)) parts.push(`声の大きさ(最大)は約 ${Math.round(d.peakDbfs)} dBFS でした(${GATE.peakQuietDbfs} dBFS 以上が目安)。`);
+  }
+  return parts.length ? `測った値の目安:${parts.join('')}` : null;
+}
+
 export function renderRetry(
   reason: GateReason | 'interrupted', onRetry: () => void, onHome: () => void,
+  detail?: GateDetail,
 ): HTMLElement {
-  return h('section', { class: 'screen notice-screen' },
+  const detailText = retryDetailText(reason, detail);
+  const screen = h('section', { class: 'screen notice-screen' },
     h('h1', {}, 'もう一度録音しましょう'),
     h('p', {}, RETRY_COPY[reason]),
+  );
+  if (detailText) screen.append(h('p', { class: 'retry-detail' }, detailText));
+  screen.append(
     micButton('もう一度録音する', onRetry),
     button(HOME_LABEL, onHome),
   );
+  return screen;
 }

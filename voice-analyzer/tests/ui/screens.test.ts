@@ -180,6 +180,25 @@ describe('renderRetry', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(b.disabled).toBe(true);
   });
+  it('shows rounded measured values for too-noisy and too-quiet only', () => {
+    const detail = { snrDb: 17.4, noiseFloorDbfs: -48.2, speechDbfs: -31, peakDbfs: -38.4 };
+    const noisy = renderRetry('too-noisy', noop, noop, detail).querySelector('.retry-detail')!.textContent!;
+    expect(noisy).toContain('録音前の静けさとの差は約 17 dB でした(20 dB 以上が目安)');
+    expect(noisy).toContain('録音前の音の大きさは約 -48 dBFS でした');
+    const quiet = renderRetry('too-quiet', noop, noop, detail).querySelector('.retry-detail')!.textContent!;
+    expect(quiet).toContain('約 -38 dBFS でした(-30 dBFS 以上が目安)');
+    for (const r of REASONS.filter((x) => x !== 'too-noisy' && x !== 'too-quiet')) {
+      expect(renderRetry(r, noop, noop, detail).querySelector('.retry-detail')).toBeNull();
+    }
+    expect(renderRetry('too-noisy', noop, noop).querySelector('.retry-detail')).toBeNull();
+  });
+  it('omits null values and never prints NaN', () => {
+    const t = renderRetry('too-noisy', noop, noop, { snrDb: null, noiseFloorDbfs: null, speechDbfs: -30, peakDbfs: -10 });
+    expect(t.querySelector('.retry-detail')).toBeNull();
+    const nan = renderRetry('too-noisy', noop, noop, { snrDb: Number.NaN, noiseFloorDbfs: -50, speechDbfs: -30, peakDbfs: -10 });
+    expect(nan.textContent).not.toContain('NaN');
+    expect(nan.querySelector('.retry-detail')!.textContent).toContain('-50 dBFS');
+  });
   it('always has a 最初にもどる button', () => {
     for (const r of REASONS) {
       const onHome = vi.fn();
@@ -364,7 +383,8 @@ describe('banned-word lint over all screens', () => {
       }));
     }
     for (const e of MIC) els.push(renderMicError(e, noop));
-    for (const r of REASONS) els.push(renderRetry(r, noop, noop));
+    const lintDetail = { snrDb: 17, noiseFloorDbfs: -48, speechDbfs: -31, peakDbfs: -38 };
+    for (const r of REASONS) els.push(renderRetry(r, noop, noop), renderRetry(r, noop, noop, lintDetail));
     for (const el of els) {
       expect(findBannedWords(el.textContent ?? '')).toEqual([]);
       for (const n of [el, ...Array.from(el.querySelectorAll('*'))]) {

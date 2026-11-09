@@ -78,7 +78,7 @@ describe('checkGate', () => {
   it('rejects clipping by ratio', () => {
     const s = speech();
     for (let i = 0; i < s.length; i += 500) s[i] = i % 1000 === 0 ? 1 : -1;
-    expect(run({ samples: s })).toEqual({ ok: false, reason: 'clipping' });
+    expect(run({ samples: s })).toMatchObject({ ok: false, reason: 'clipping' });
   });
 
   it('rejects a run of 3 consecutive clipped samples even below the ratio', () => {
@@ -86,7 +86,7 @@ describe('checkGate', () => {
     s[1000] = 1;
     s[1001] = 1;
     s[1002] = 1;
-    expect(run({ samples: s })).toEqual({ ok: false, reason: 'clipping' });
+    expect(run({ samples: s })).toMatchObject({ ok: false, reason: 'clipping' });
   });
 
   it('does not reject two isolated clipped samples', () => {
@@ -96,17 +96,112 @@ describe('checkGate', () => {
     expect(run({ samples: s }).ok).toBe(true);
   });
 
-  it('warns at SNR 27 dB and rejects at SNR 20 dB', () => {
-    const s = speech();
-    const snrCase = (snr: number) =>
-      run({ samples: s, preRoll: whiteNoise(SR / 2, rms(s) * Math.pow(10, -snr / 20)) });
-    const borderline = snrCase(27);
+  /** Pre-roll of white noise placed `snr` dB below the (filtered) speech level the gate measures. */
+  function snrRun(snr: number, sr = SR, task: 'vowel' | 'sentence' = 'vowel', peakDb = -10) {
+    const s = scaleToPeakDb(
+      harmonicTone({ f0: 150, seconds: 4, sampleRate: sr, tiltDbPerOctave: -6, noiseDb: -20 }),
+      peakDb,
+    );
+    const base = run({ samples: s, sampleRate: sr, task, preRoll: silence(0.5, sr) });
+    const speechDb = base.detail.speechDbfs;
+    const noise = whiteNoise(sr / 2, Math.pow(10, (speechDb - snr) / 20));
+    return run({ samples: s, sampleRate: sr, task, preRoll: noise });
+  }
+
+  it('warns at SNR 27 dB, accepts silently at 40 dB, rejects below 20 dB', () => {
+    const borderline = snrRun(27);
     expect(borderline.ok).toBe(true);
     if (borderline.ok) expect(borderline.warnings).toContain('noise-borderline');
-    expect(snrCase(20)).toEqual({ ok: false, reason: 'too-noisy' });
-    const clean = snrCase(40);
+    const lowish = snrRun(22);
+    expect(lowish.ok).toBe(true);
+    if (lowish.ok) expect(lowish.warnings).toContain('noise-borderline');
+    expect(snrRun(17)).toMatchObject({ ok: false, reason: 'too-noisy' });
+    const clean = snrRun(40);
     expect(clean.ok).toBe(true);
     if (clean.ok) expect(clean.warnings).not.toContain('noise-borderline');
+  });
+
+  it('has exact boundaries at SNR 20 dB (reject) and 30 dB (warning)', () => {
+    expect(snrRun(19.5)).toMatchObject({ ok: false, reason: 'too-noisy' });
+    const just20 = snrRun(20.5);
+    expect(just20.ok).toBe(true);
+    if (just20.ok) expect(just20.warnings).toContain('noise-borderline');
+    const just29 = snrRun(29.5);
+    expect(just29.ok && just29.warnings.includes('noise-borderline')).toBe(true);
+    // Quieter speech so that the pre-roll stays below the -50 dBFS noise-floor warning.
+    const just31 = snrRun(30.5, SR, 'vowel', -22);
+    expect(just31.ok && just31.warnings.includes('noise-borderline')).toBe(false);
+  });
+
+  it('exposes finite detail on rejects and accepts', () => {
+    const r = snrRun(17);
+    expect(r.ok).toBe(false);
+    expect(r.detail.snrDb!).toBeCloseTo(17, 0);
+    for (const v of Object.values(r.detail)) expect(Number.isFinite(v as number)).toBe(true);
+    const noRoll = run({ preRoll: new Float32Array(0) });
+    expect(noRoll.detail.snrDb).toBeNull();
+    expect(noRoll.detail.noiseFloorDbfs).toBeNull();
+    expect(Number.isFinite(noRoll.detail.peakDbfs)).toBe(true);
+    const quiet = run({ samples: scaleToPeakDb(speech(), -35) });
+    expect(quiet).toMatchObject({ ok: false, reason: 'too-quiet' });
+    expect(quiet.detail.peakDbfs).toBeCloseTo(-35, 0);
+  });
+
+  describe.each([16000, 44100, 48000])('SNR filtering at %i Hz', (sr) => {
+    const lvl = (db: number) => Math.pow(10, db / 20);
+    it('ignores a pure DC offset of 0.01 in the pre-roll', () => {
+      const pre = new Float32Array(sr / 2).fill(0.01);
+      const r = snrRun(60, sr);
+      const withDc = run({
+        samples: scaleToPeakDb(harmonicTone({ f0: 150, seconds: 4, sampleRate: sr, tiltDbPerOctave: -6, noiseDb: -20 }), -10),
+        sampleRate: sr,
+        preRoll: pre,
+      });
+      expect(withDc.ok).toBe(true);
+      expect(withDc.detail.snrDb!).toBeGreaterThan(50);
+      expect(r.ok).toBe(true);
+    });
+    const humCase = (hz: number, kind: 'sine' | 'noise') => {
+      const n = sr / 2;
+      const pre = new Float32Array(n);
+      if (kind === 'sine') {
+        for (let i = 0; i < n; i++) pre[i] = Math.SQRT2 * lvl(-35) * Math.sin((2 * Math.PI * hz * i) / sr);
+      }
+      return run({
+        samples: scaleToPeakDb(harmonicTone({ f0: 150, seconds: 4, sampleRate: sr, tiltDbPerOctave: -6, noiseDb: -20 }), -10),
+        sampleRate: sr,
+        preRoll: pre,
+      });
+    };
+    it('does not count a 50 Hz hum at -35 dBFS as noise', () => {
+      const r = humCase(50, 'sine');
+      expect(r.ok).toBe(true);
+      // 2nd-order 80 Hz high-pass: about -9 dB at 50 Hz.
+      expect(r.detail.noiseFloorDbfs!).toBeLessThan(-42);
+      expect(r.detail.noiseFloorDbfs!).toBeGreaterThan(-46);
+    });
+    it('does count a 300 Hz tone at -35 dBFS as noise', () => {
+      const r = humCase(300, 'sine');
+      expect(r.detail.noiseFloorDbfs!).toBeGreaterThan(-37);
+      expect(r.detail.noiseFloorDbfs!).toBeLessThan(-33);
+      expect(r.detail.snrDb!).toBeLessThan(25);
+    });
+    it('rejects and accepts around 20 dB alike', () => {
+      expect(snrRun(17, sr)).toMatchObject({ ok: false, reason: 'too-noisy' });
+      expect(snrRun(22, sr).ok).toBe(true);
+    });
+  });
+
+  it('measures speech level over the 20 dB window (pauses do not lower it)', () => {
+    const tone = speech(1);
+    const gap = silence(1, SR);
+    const withPauses = new Float32Array(tone.length * 3 + gap.length * 2);
+    withPauses.set(tone, 0);
+    withPauses.set(tone, tone.length + gap.length);
+    withPauses.set(tone, 2 * (tone.length + gap.length));
+    const plain = run({ samples: tone });
+    const paused = run({ samples: withPauses });
+    expect(Math.abs(paused.detail.speechDbfs - plain.detail.speechDbfs)).toBeLessThan(0.5);
   });
 
   it('rejects silent input as no-voice without NaN or throwing', () => {
@@ -114,33 +209,24 @@ describe('checkGate', () => {
       samples: silence(3, SR),
       features: features({ voicedSeconds: 0, f0MedianHz: null, f0StabilitySt: null }),
     });
-    expect(r).toEqual({ ok: false, reason: 'no-voice' });
+    expect(r).toMatchObject({ ok: false, reason: 'no-voice' });
   });
 
   it('rejects a very quiet recording as too-quiet, warns when merely low', () => {
     const quiet = run({ samples: scaleToPeakDb(speech(), -35) });
-    expect(quiet).toEqual({ ok: false, reason: 'too-quiet' });
+    expect(quiet).toMatchObject({ ok: false, reason: 'too-quiet' });
     const low = run({ samples: scaleToPeakDb(speech(), -25) });
     expect(low.ok).toBe(true);
     if (low.ok) expect(low.warnings).toContain('low-level');
   });
 
   it('rejects a short vowel and a short sentence', () => {
-    expect(run({ features: features({ voicedSeconds: 2 }) })).toEqual({
-      ok: false,
-      reason: 'vowel-too-short',
-    });
-    expect(run({ task: 'sentence', features: features({ voicedSeconds: 2 }) })).toEqual({
-      ok: false,
-      reason: 'sentence-too-short',
-    });
+    expect(run({ features: features({ voicedSeconds: 2 }) })).toMatchObject({ ok: false, reason: 'vowel-too-short' });
+    expect(run({ task: 'sentence', features: features({ voicedSeconds: 2 }) })).toMatchObject({ ok: false, reason: 'sentence-too-short' });
   });
 
   it('rejects an unstable vowel but not a steady one', () => {
-    expect(run({ features: features({ f0StabilitySt: 1 }) })).toEqual({
-      ok: false,
-      reason: 'vowel-unstable',
-    });
+    expect(run({ features: features({ f0StabilitySt: 1 }) })).toMatchObject({ ok: false, reason: 'vowel-unstable' });
     expect(run({ features: features({ f0StabilitySt: 0.3 }) }).ok).toBe(true);
     // stability only matters for vowels
     expect(run({ task: 'sentence', features: features({ f0StabilitySt: 1 }) }).ok).toBe(true);
@@ -170,8 +256,8 @@ describe('checkGate', () => {
   });
 
   it('rejects silent or empty samples without NaN or throwing', () => {
-    expect(run({ samples: silence(3, SR) })).toEqual({ ok: false, reason: 'too-quiet' });
-    expect(run({ samples: new Float32Array(0) })).toEqual({ ok: false, reason: 'too-quiet' });
+    expect(run({ samples: silence(3, SR) })).toMatchObject({ ok: false, reason: 'too-quiet' });
+    expect(run({ samples: new Float32Array(0) })).toMatchObject({ ok: false, reason: 'too-quiet' });
   });
 
   it('treats an empty preRoll as unknown SNR: no reject, noise-borderline warning', () => {

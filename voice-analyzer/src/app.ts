@@ -1,7 +1,7 @@
 import type { MicError, Recorder } from './audio/capture';
 import { classify, medianProfile } from './diagnosis/classify';
 import { buildFeedback } from './diagnosis/feedback';
-import { checkGate } from './diagnosis/gate';
+import { checkGate, type GateDetail } from './diagnosis/gate';
 import type { GateReason, GateWarning } from './diagnosis/gate';
 import { NOTICE_NOISE, NOTICE_PROCESSING } from './diagnosis/copy';
 import { toProfile } from './diagnosis/profile';
@@ -212,17 +212,17 @@ export class App {
       if (!live()) return;
       const vowel = extractVowel(vowelRec.samples, sr);
       const sentence = extractSentence(sentenceRec.samples, sr);
-      const gates: GateReason[] = [];
+      const gates: { reason: GateReason; detail: GateDetail }[] = [];
       const warnings: GateWarning[] = [];
       for (const g of [
         checkGate({ samples: vowelRec.samples, sampleRate: sr, preRoll: vowelRec.preRoll, task: 'vowel', features: vowel, processingOn }),
         checkGate({ samples: sentenceRec.samples, sampleRate: sr, preRoll: sentenceRec.preRoll, task: 'sentence', features: sentence, processingOn }),
       ]) {
         if (g.ok) warnings.push(...g.warnings);
-        else gates.push(g.reason);
+        else gates.push({ reason: g.reason, detail: g.detail });
       }
       if (gates.length) {
-        this.show(renderRetry(gates[0], retry, this.home));
+        this.show(renderRetry(gates[0].reason, retry, this.home, gates[0].detail));
         return;
       }
       this.sets.push({ vowel, sentence, flags: { processingOn } });
