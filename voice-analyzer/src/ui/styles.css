@@ -82,3 +82,4 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
 .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
 
 .notice-screen h1 { color: var(--fg); }
+.remaining { color: var(--muted); font-variant-numeric: tabular-nums; }

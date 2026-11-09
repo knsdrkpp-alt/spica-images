@@ -70,65 +70,109 @@ export function renderStart(onStart: (sex: Sex) => void): HTMLElement {
   );
 }
 
+export type RecordingPhase = 'vowel' | 'sentence' | 'rest' | 'analyzing';
+
 export interface RecordingView {
   el: HTMLElement;
-  setPhase(p: 'vowel' | 'sentence' | 'rest'): void;
+  setPhase(p: RecordingPhase): void;
+  /** While not ready (the noise pre-roll), only the "please wait" status is shown. */
   setReady(ready: boolean): void;
+  /** Seconds left in the vowel; null hides the countdown. */
+  setRemaining(seconds: number | null): void;
   setWave(w: Float32Array): void;
 }
 
 const WAVE = { w: 300, h: 80 };
+const FLAT_POINTS = `0,${WAVE.h / 2} ${WAVE.w},${WAVE.h / 2}`;
+
+export const ANALYZING_TEXT = '結果をまとめています…';
+
+function wavePoints(w: Float32Array): string {
+  const n = Math.min(w.length, WAVE.w);
+  if (n === 0) return FLAT_POINTS;
+  const pts: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const raw = w[Math.floor((i * w.length) / n)];
+    const v = Number.isFinite(raw) ? Math.max(-1, Math.min(1, raw)) : 0;
+    pts.push(`${((i / Math.max(1, n - 1)) * WAVE.w).toFixed(1)},${(WAVE.h / 2 - v * (WAVE.h / 2 - 2)).toFixed(1)}`);
+  }
+  return pts.join(' ');
+}
 
 export function renderRecording(onStop: () => void): RecordingView {
   const status = h('p', { class: 'status', role: 'status' });
   const prompt = h('p', { class: 'prompt' });
   const sub = h('p', { class: 'note' });
+  const remaining = h('p', { class: 'remaining', 'aria-live': 'polite' });
   const svg = svgEl('svg', {
     viewBox: `0 0 ${WAVE.w} ${WAVE.h}`, class: 'wave', role: 'img', 'aria-label': '録音中の声の波形',
   });
-  const line = svgEl('polyline', { fill: 'none', points: `0,${WAVE.h / 2} ${WAVE.w},${WAVE.h / 2}` });
+  const line = svgEl('polyline', { fill: 'none', points: FLAT_POINTS });
   svg.appendChild(line);
   const stop = button('終了', onStop, 'btn primary');
-  stop.hidden = true;
 
   const view = h('section', { class: 'screen recording' },
-    h('h1', {}, '録音中'), status, prompt, sub, svg, stop);
+    h('h1', {}, '録音中'), status, prompt, sub, remaining, svg, stop);
 
-  function setPhase(p: 'vowel' | 'sentence' | 'rest'): void {
-    status.hidden = p === 'rest';
-    if (p === 'rest') {
-      status.textContent = '';
-      prompt.textContent = 'ひと息ついてください';
-      sub.textContent = '';
-    } else if (p === 'vowel') {
-      prompt.textContent = '「あー」と、楽な声で約5秒のばしてください';
-      sub.textContent = '';
-    } else {
-      prompt.textContent = READING_TEXT;
-      sub.textContent = 'ふだんの話し方で読み上げてください';
-    }
-    stop.hidden = p !== 'sentence';
+  let phase: RecordingPhase = 'vowel';
+  let ready = false;
+  let left: number | null = null;
+
+  function render(): void {
+    const recordingPhase = phase === 'vowel' || phase === 'sentence';
+    status.hidden = !recordingPhase;
+    status.textContent = !recordingPhase ? '' : ready ? 'どうぞ' : '準備しています。静かにお待ちください';
+    // During the pre-roll the instruction stays hidden so nobody starts speaking into the noise measurement.
+    const showPrompt = !recordingPhase || ready;
+    let p = '';
+    let s = '';
+    if (phase === 'rest') p = 'ひと息ついてください';
+    else if (phase === 'analyzing') p = ANALYZING_TEXT;
+    else if (phase === 'vowel') p = '「あー」と、楽な声で約5秒のばしてください';
+    else { p = READING_TEXT; s = 'ふだんの話し方で読み上げてください'; }
+    prompt.textContent = showPrompt ? p : '';
+    sub.textContent = showPrompt ? s : '';
+    prompt.hidden = !showPrompt;
+    sub.hidden = !showPrompt || s === '';
+    const showLeft = phase === 'vowel' && ready && left !== null;
+    remaining.hidden = !showLeft;
+    remaining.textContent = showLeft ? `あと ${left} 秒` : '';
+    stop.hidden = !(phase === 'sentence' && ready);
+    svg.style.visibility = phase === 'analyzing' ? 'hidden' : '';
   }
-  function setReady(r: boolean): void {
-    status.textContent = r ? 'どうぞ' : '準備しています。静かにお待ちください';
+
+  // Wave updates arrive every 128-sample block; repaint at most once per animation frame.
+  let pendingWave: Float32Array | null = null;
+  let frame: number | null = null;
+  const raf: (cb: () => void) => number = typeof requestAnimationFrame === 'function'
+    ? (cb) => requestAnimationFrame(cb)
+    : (cb) => setTimeout(cb, 16) as unknown as number;
+  function flushWave(): void {
+    frame = null;
+    const w = pendingWave;
+    pendingWave = null;
+    if (w && view.isConnected) line.setAttribute('points', wavePoints(w));
   }
   function setWave(w: Float32Array): void {
-    const n = Math.min(w.length, WAVE.w);
-    if (n === 0) {
-      line.setAttribute('points', `0,${WAVE.h / 2} ${WAVE.w},${WAVE.h / 2}`);
-      return;
-    }
-    const pts: string[] = [];
-    for (let i = 0; i < n; i++) {
-      const raw = w[Math.floor((i * w.length) / n)];
-      const v = Number.isFinite(raw) ? Math.max(-1, Math.min(1, raw)) : 0;
-      pts.push(`${((i / Math.max(1, n - 1)) * WAVE.w).toFixed(1)},${(WAVE.h / 2 - v * (WAVE.h / 2 - 2)).toFixed(1)}`);
-    }
-    line.setAttribute('points', pts.join(' '));
+    pendingWave = w;
+    if (frame === null) frame = raf(flushWave);
   }
-  setPhase('vowel');
-  setReady(false);
-  return { el: view, setPhase, setReady, setWave };
+
+  function setPhase(p: RecordingPhase): void {
+    phase = p;
+    if (p !== 'vowel') left = null;
+    render();
+  }
+  function setReady(r: boolean): void {
+    ready = r;
+    render();
+  }
+  function setRemaining(seconds: number | null): void {
+    left = seconds === null ? null : Math.max(0, Math.ceil(seconds));
+    render();
+  }
+  render();
+  return { el: view, setPhase, setReady, setRemaining, setWave };
 }
 
 const hzRange = (i: number) => `${BAND_EDGES_HZ[i]}〜${BAND_EDGES_HZ[i + 1]} Hz`;
@@ -225,7 +269,7 @@ export function renderMicError(e: MicError, onBack: () => void): HTMLElement {
 }
 
 const RETRY_COPY: Record<GateReason | 'interrupted', string> = {
-  'too-noisy': '周りの音が大きいようです。もっと静かな場所へ移動して、録り直してください。',
+  'too-noisy': '周りの音が大きいようです。もっと静かな場所へ移動して、録り直してください。「どうぞ」が出てから話し始めてください。',
   clipping: '音が大きすぎて割れていました。マイクから少し離れて、小さめの声でお試しください。',
   'too-quiet': '声が小さく録音されました。マイクに少し近づいて、もう一度お試しください。',
   'no-voice': '声が聞き取れませんでした。マイクの位置や設定を確認して、もう一度お試しください。',

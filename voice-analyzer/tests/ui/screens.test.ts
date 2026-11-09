@@ -113,6 +113,9 @@ describe('renderMicError', () => {
 });
 
 describe('renderRetry', () => {
+  it('too-noisy asks to start speaking only after どうぞ', () => {
+    expect(renderRetry('too-noisy', noop).textContent).toContain('「どうぞ」が出てから話し始めてください。');
+  });
   it('has a distinct message per reason and a retry button', () => {
     const texts = REASONS.map((r) => renderRetry(r, noop).textContent);
     expect(new Set(texts).size).toBe(8);
@@ -150,6 +153,7 @@ describe('renderRecording', () => {
     const onStop = vi.fn();
     const r = renderRecording(onStop);
     r.setPhase('vowel');
+    r.setReady(true);
     expect(r.el.textContent).toContain('「あー」と、楽な声で約5秒のばしてください');
     expect(r.el.textContent).not.toContain(READING_TEXT);
     const stop = () => buttonByText(r.el, '終了')!;
@@ -189,24 +193,92 @@ describe('renderRecording', () => {
     expect(r.el.textContent).toContain('どうぞ');
     expect(r.el.textContent).not.toContain('準備しています');
   });
-  it('setWave yields finite output', () => {
+  const nextFrame = () => new Promise<void>((res) => requestAnimationFrame(() => res()));
+  it('setWave yields finite output', async () => {
     const r = renderRecording(noop);
+    document.body.replaceChildren(r.el);
     r.setWave(Float32Array.from([0, 0.5, -0.5, NaN, Infinity, 1]));
+    await nextFrame();
+    const pts = r.el.querySelector('polyline')!.getAttribute('points')!;
+    expect(pts.split(' ')).toHaveLength(6);
     r.setWave(new Float32Array(0));
+    await nextFrame();
     const html = r.el.innerHTML;
     expect(html).not.toContain('NaN');
     expect(html).not.toContain('Infinity');
+  });
+  it('setWave repaints at most once per frame, with the latest block', async () => {
+    const r = renderRecording(noop);
+    document.body.replaceChildren(r.el);
+    const line = r.el.querySelector('polyline')!;
+    const spy = vi.spyOn(line, 'setAttribute');
+    for (let i = 0; i < 20; i++) r.setWave(Float32Array.from([i / 20, 0, 0]));
+    expect(spy).not.toHaveBeenCalled();
+    await nextFrame();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(line.getAttribute('points')).toContain(`,${(40 - (19 / 20) * 38).toFixed(1)}`);
+    // replaced screen: a late frame does nothing
+    r.setWave(Float32Array.from([0.5, 0.5]));
+    document.body.replaceChildren();
+    await nextFrame();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+  it('hides the instruction while not ready and shows it once ready (vowel and sentence)', () => {
+    const r = renderRecording(noop);
+    const stop = () => buttonByText(r.el, '終了')!;
+    r.setPhase('vowel');
+    r.setReady(false);
+    expect(r.el.textContent).toContain('準備しています。静かにお待ちください');
+    expect(r.el.textContent).not.toContain('「あー」と');
+    expect(r.el.querySelector<HTMLElement>('.prompt')!.hidden).toBe(true);
+    r.setReady(true);
+    expect(r.el.textContent).toContain('「あー」と、楽な声で約5秒のばしてください');
+    expect(r.el.querySelector<HTMLElement>('.prompt')!.hidden).toBe(false);
+    r.setPhase('sentence');
+    r.setReady(false);
+    expect(r.el.textContent).not.toContain(READING_TEXT);
+    expect(r.el.textContent).not.toContain('ふだんの話し方');
+    expect(stop().hidden).toBe(true);
+    r.setReady(true);
+    expect(r.el.textContent).toContain(READING_TEXT);
+    expect(stop().hidden).toBe(false);
+  });
+  it('shows the vowel countdown only in the ready vowel phase', () => {
+    const r = renderRecording(noop);
+    r.setRemaining(6.5);
+    expect(r.el.textContent).not.toContain('あと');
+    r.setReady(true);
+    expect(r.el.textContent).toContain('あと 7 秒');
+    r.setRemaining(0.5);
+    expect(r.el.textContent).toContain('あと 1 秒');
+    r.setPhase('rest');
+    expect(r.el.textContent).not.toContain('あと');
+    r.setPhase('vowel');
+    expect(r.el.textContent).not.toContain('あと');
+  });
+  it('analysing phase shows only the analysing message', () => {
+    const r = renderRecording(noop);
+    r.setPhase('sentence');
+    r.setReady(true);
+    r.setPhase('analyzing');
+    const t = r.el.textContent ?? '';
+    expect(t).toContain('結果をまとめています…');
+    expect(t).not.toContain(READING_TEXT);
+    expect(t).not.toContain('どうぞ');
+    expect(t).not.toContain('準備しています');
+    expect(buttonByText(r.el, '終了')!.hidden).toBe(true);
   });
 });
 
 describe('banned-word lint over all screens', () => {
   it('finds none', () => {
     const els: HTMLElement[] = [renderStart(noop)];
-    for (const ph of ['vowel', 'sentence', 'rest'] as const) {
+    for (const ph of ['vowel', 'sentence', 'rest', 'analyzing'] as const) {
       for (const ready of [false, true]) {
         const r = renderRecording(noop);
         r.setPhase(ph);
         r.setReady(ready);
+        r.setRemaining(3);
         els.push(r.el);
       }
     }

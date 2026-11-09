@@ -11,7 +11,13 @@ import {
   renderMicError, renderRecording, renderResult, renderRetry, renderStart,
 } from './ui/screens';
 
-export const VOWEL_SECONDS = 5;
+/**
+ * Vowel recording length. The on-screen instruction still says 約5秒: features trim 0.75 s from each
+ * end and the gate needs >= 3 s voiced, so the extra time lets a slow starter still pass.
+ */
+export const VOWEL_SECONDS = 6.5;
+/** Countdown granularity during the vowel. */
+const TICK_MS = 1000;
 export const SENTENCE_MAX_SECONDS = 12;
 /** Pause between the vowel and the sentence so a lingering 「あー」 cannot reach the sentence's noise pre-roll. */
 export const REST_SECONDS = 1.5;
@@ -21,9 +27,18 @@ export interface AppDeps {
   openRecorder: () => Promise<Recorder | { error: MicError }>;
   norms: Norms;
   sleep?: (ms: number) => Promise<void>;
+  /** Lets the browser paint (e.g. the analysing message) before the synchronous analysis runs. */
+  yieldToPaint?: () => Promise<void>;
 }
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** One animation frame (so the pending DOM change is painted), then a macrotask. */
+const realYieldToPaint = () => new Promise<void>((resolve) => {
+  const after = () => setTimeout(resolve, 0);
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(after);
+  else after();
+});
 
 function meanBandShare(sets: SetFeatures[]): number[] {
   const len = sets[0].sentence.bandShare.length;
@@ -35,6 +50,7 @@ function meanBandShare(sets: SetFeatures[]): number[] {
 
 export class App {
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly yieldToPaint: () => Promise<void>;
   private recorder: Recorder | null = null;
   private sets: SetFeatures[] = [];
   private sex: Sex = 'unspecified';
@@ -43,6 +59,7 @@ export class App {
 
   constructor(private readonly root: HTMLElement, private readonly deps: AppDeps) {
     this.sleep = deps.sleep ?? realSleep;
+    this.yieldToPaint = deps.yieldToPaint ?? realYieldToPaint;
   }
 
   start(): void {
@@ -130,8 +147,13 @@ export class App {
       await recorder.start((_rms, wave) => { if (alive()) view.setWave(wave); });
       if (!alive()) return;
       view.setReady(true);
-      await this.sleep(VOWEL_SECONDS * 1000);
-      if (!alive()) return;
+      for (let leftMs = VOWEL_SECONDS * 1000; leftMs > 0;) {
+        view.setRemaining(leftMs / 1000);
+        const step = Math.min(TICK_MS, leftMs);
+        await this.sleep(step);
+        if (!alive()) return;
+        leftMs -= step;
+      }
       const vowelRec = await recorder.stop();
       if (!alive()) return;
 
@@ -154,6 +176,9 @@ export class App {
       recorder.onInterrupted = null;
       const sr = recorder.sampleRate;
       const processingOn = recorder.processingOn;
+      view.setPhase('analyzing');
+      await this.yieldToPaint();
+      if (!alive()) return;
       const vowel = extractVowel(vowelRec.samples, sr);
       const sentence = extractSentence(sentenceRec.samples, sr);
       const gates: GateReason[] = [];

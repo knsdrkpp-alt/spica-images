@@ -36,7 +36,8 @@ function trackNetwork(page: Page) {
 async function recordSet(page: Page) {
   await expect(page.getByText('どうぞ')).toBeVisible({ timeout: 20_000 });
   await voice(page, 'on');
-  // Like a person who holds 「あー」 slightly past the 5 s mark: keep voicing until 300 ms
+  await expect(page.getByText(/あと \d 秒/)).toBeVisible();
+  // Like a person who holds 「あー」 slightly past the end of the vowel step: keep voicing until 300 ms
   // after the rest prompt appears, then stop.
   await expect(page.getByText('ひと息ついてください')).toBeVisible({ timeout: 20_000 });
   await page.waitForTimeout(300);
