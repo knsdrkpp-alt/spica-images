@@ -60,6 +60,8 @@ export class App {
   constructor(private readonly root: HTMLElement, private readonly deps: AppDeps) {
     this.sleep = deps.sleep ?? realSleep;
     this.yieldToPaint = deps.yieldToPaint ?? realYieldToPaint;
+    // Leaving the page (or freezing it into the back/forward cache) must not keep the mic open.
+    root.ownerDocument.defaultView?.addEventListener('pagehide', () => this.onPageHide());
   }
 
   start(): void {
@@ -68,6 +70,8 @@ export class App {
     this.sets = [];
     this.show(renderStart((sex) => this.begin(sex)));
   }
+
+  private readonly home = () => this.start();
 
   private show(el: HTMLElement): void {
     this.root.replaceChildren(el);
@@ -82,16 +86,30 @@ export class App {
     }
   }
 
+  private onPageHide(): void {
+    if (!this.recorder) return; // result/retry/start screens hold no mic
+    this.token++; // abandon the running set
+    this.releaseRecorder();
+    this.show(renderRetry('interrupted', () => this.openAndRun(), this.home));
+  }
+
   private begin(sex: Sex): void {
     this.sex = sex;
+    this.openAndRun();
+  }
+
+  /**
+   * Opens the microphone and runs one set. Must be called synchronously from a click handler
+   * (start, もう1セット, もう一度録音する) so getUserMedia / AudioContext keep the user gesture.
+   */
+  private openAndRun(): void {
     this.releaseRecorder();
     const token = ++this.token;
-    // openRecorder is called synchronously from the click handler to keep the user gesture.
     let opening: Promise<Recorder | { error: MicError }>;
     try {
       opening = this.deps.openRecorder();
     } catch {
-      this.show(renderMicError('unsupported', () => this.start()));
+      this.show(renderMicError('unsupported', this.home));
       return;
     }
     void opening.then(
@@ -101,14 +119,14 @@ export class App {
           return;
         }
         if ('error' in res) {
-          this.show(renderMicError(res.error, () => this.start()));
+          this.show(renderMicError(res.error, this.home));
           return;
         }
         this.recorder = res;
         return this.runSet();
       },
       () => {
-        if (token === this.token) this.show(renderMicError('unsupported', () => this.start()));
+        if (token === this.token) this.show(renderMicError('unsupported', this.home));
       },
     ).catch(() => {
       if (token === this.token) this.fail();
@@ -118,7 +136,7 @@ export class App {
   /** Unexpected failure: free the mic and show a generic retry-less error. */
   private fail(): void {
     this.releaseRecorder();
-    this.show(renderMicError('unsupported', () => this.start()));
+    this.show(renderMicError('unsupported', this.home));
   }
 
   private async runSet(): Promise<void> {
@@ -126,15 +144,14 @@ export class App {
     if (!recorder) return;
     const token = ++this.token;
     const alive = () => token === this.token && this.recorder === recorder;
-    const retry = () => {
-      this.runSet().catch(() => this.fail());
-    };
+    const retry = () => this.openAndRun();
 
     recorder.onInterrupted = () => {
       if (!alive()) return;
       this.token++; // abandon: late results of this run are ignored
       recorder.discard();
-      this.show(renderRetry('interrupted', retry));
+      this.releaseRecorder();
+      this.show(renderRetry('interrupted', retry, this.home));
     };
 
     let stopSentence: () => void = () => {};
@@ -173,12 +190,14 @@ export class App {
       const sentenceRec = await recorder.stop();
       if (!alive()) return;
 
-      recorder.onInterrupted = null;
       const sr = recorder.sampleRate;
       const processingOn = recorder.processingOn;
+      // Both takes are in memory: close the mic before analysing; the next set reopens it.
+      this.releaseRecorder();
+      const live = () => token === this.token;
       view.setPhase('analyzing');
       await this.yieldToPaint();
-      if (!alive()) return;
+      if (!live()) return;
       const vowel = extractVowel(vowelRec.samples, sr);
       const sentence = extractSentence(sentenceRec.samples, sr);
       const gates: GateReason[] = [];
@@ -187,13 +206,13 @@ export class App {
       const gs = checkGate({ samples: sentenceRec.samples, sampleRate: sr, preRoll: sentenceRec.preRoll, task: 'sentence', features: sentence, processingOn });
       if (!gs.ok) gates.push(gs.reason);
       if (gates.length) {
-        this.show(renderRetry(gates[0], retry));
+        this.show(renderRetry(gates[0], retry, this.home));
         return;
       }
       this.sets.push({ vowel, sentence, flags: { processingOn } });
       this.showResult();
     } catch {
-      if (alive()) this.fail();
+      if (token === this.token) this.fail();
     }
   }
 
@@ -202,14 +221,11 @@ export class App {
     const profiles = sets.map((s) => toProfile(s, this.sex, deps.norms));
     const c = classify(profiles);
     const f = buildFeedback(c, medianProfile(profiles), sets[sets.length - 1], sets.length);
-    const canRecordMore = sets.length < MAX_SETS;
-    if (!canRecordMore) this.releaseRecorder();
     this.show(renderResult(f, meanBandShare(sets), {
       provisionalNorms: deps.norms.provisional,
-      canRecordMore,
-      onAgain: () => {
-        this.runSet().catch(() => this.fail());
-      },
+      canRecordMore: sets.length < MAX_SETS,
+      onAgain: () => this.openAndRun(),
+      onHome: this.home,
     }));
   }
 }

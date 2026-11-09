@@ -25,8 +25,9 @@ const REASONS: (GateReason | 'interrupted')[] = [
   'too-noisy', 'clipping', 'too-quiet', 'no-voice', 'vowel-too-short', 'vowel-unstable', 'sentence-too-short', 'interrupted',
 ];
 const count = (s: string, sub: string) => s.split(sub).length - 1;
-const result = (o: Partial<{ provisionalNorms: boolean; canRecordMore: boolean; onAgain: () => void }> = {}) =>
-  renderResult(fb, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, ...o });
+type ResultOpts = Parameters<typeof renderResult>[2];
+const result = (o: Partial<ResultOpts> = {}) =>
+  renderResult(fb, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, ...o });
 const buttonByText = (el: HTMLElement, t: string) =>
   Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes(t));
 
@@ -43,7 +44,7 @@ describe('renderResult', () => {
     expect(el.textContent).toContain('グラフの読み方');
   });
   it('keeps STOP_NOTICE and footer exactly once even without practice steps', () => {
-    const el = renderResult({ ...fb, practice: [] }, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop });
+    const el = renderResult({ ...fb, practice: [] }, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop });
     expect(count(el.textContent!, STOP_NOTICE)).toBe(1);
     expect(count(el.textContent!, FIXED_FOOTER)).toBe(1);
     expect(el.lastElementChild!.tagName).toBe('FOOTER');
@@ -52,11 +53,21 @@ describe('renderResult', () => {
     expect(count(result({ provisionalNorms: true }).textContent!, '仮の基準')).toBe(1);
     expect(result({ provisionalNorms: false }).textContent).not.toContain('仮の基準');
   });
-  it('record-more button follows canRecordMore', () => {
+  it('record-more button follows canRecordMore and disables itself while the mic opens', () => {
     expect(buttonByText(result({ canRecordMore: false }), 'もう1セット')).toBeUndefined();
     const onAgain = vi.fn();
-    buttonByText(result({ onAgain }), 'もう1セット録音する')!.click();
+    const b = buttonByText(result({ onAgain }), 'もう1セット録音する')!;
+    b.click();
+    b.click();
     expect(onAgain).toHaveBeenCalledTimes(1);
+    expect(b.disabled).toBe(true);
+  });
+  it('always has a 最初にもどる button', () => {
+    for (const more of [true, false]) {
+      const onHome = vi.fn();
+      buttonByText(result({ canRecordMore: more, onHome }), '最初にもどる')!.click();
+      expect(onHome).toHaveBeenCalledTimes(1);
+    }
   });
   it('legend buttons toggle band notes', () => {
     const el = result();
@@ -94,7 +105,7 @@ describe('renderMicError', () => {
   });
   it('uses the neutral notice-screen class, and its CSS heading is not the accent colour', () => {
     for (const e of MIC) expect(renderMicError(e, noop).classList.contains('notice-screen')).toBe(true);
-    for (const r of REASONS) expect(renderRetry(r, noop).classList.contains('notice-screen')).toBe(true);
+    for (const r of REASONS) expect(renderRetry(r, noop, noop).classList.contains('notice-screen')).toBe(true);
     const css = readFileSync('src/ui/styles.css', 'utf8');
     const rule = css.match(/\.notice-screen h1\s*\{([^}]*)\}/);
     expect(rule).not.toBeNull();
@@ -114,30 +125,47 @@ describe('renderMicError', () => {
 
 describe('renderRetry', () => {
   it('too-noisy asks to start speaking only after どうぞ', () => {
-    expect(renderRetry('too-noisy', noop).textContent).toContain('「どうぞ」が出てから話し始めてください。');
+    expect(renderRetry('too-noisy', noop, noop).textContent).toContain('「どうぞ」が出てから話し始めてください。');
   });
   it('has a distinct message per reason and a retry button', () => {
-    const texts = REASONS.map((r) => renderRetry(r, noop).textContent);
+    const texts = REASONS.map((r) => renderRetry(r, noop, noop).textContent);
     expect(new Set(texts).size).toBe(8);
     const onRetry = vi.fn();
-    buttonByText(renderRetry('too-quiet', onRetry), 'もう一度録音する')!.click();
-    expect(onRetry).toHaveBeenCalled();
+    const b = buttonByText(renderRetry('too-quiet', onRetry, noop), 'もう一度録音する')!;
+    b.click();
+    b.click();
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(b.disabled).toBe(true);
+  });
+  it('always has a 最初にもどる button', () => {
+    for (const r of REASONS) {
+      const onHome = vi.fn();
+      buttonByText(renderRetry(r, noop, onHome), '最初にもどる')!.click();
+      expect(onHome).toHaveBeenCalledTimes(1);
+    }
   });
 });
 
 describe('renderStart', () => {
   it('defaults to unspecified and passes the selected sex', () => {
+    // The button disables itself after one click, so each choice gets a fresh screen.
     const onStart = vi.fn();
-    const el = renderStart(onStart);
-    buttonByText(el, '声を録音する')!.click();
+    buttonByText(renderStart(onStart), '声を録音する')!.click();
     expect(onStart).toHaveBeenLastCalledWith('unspecified');
-    const radio = el.querySelector<HTMLInputElement>('input[type=radio][value=female]')!;
-    radio.click();
-    buttonByText(el, '声を録音する')!.click();
-    expect(onStart).toHaveBeenLastCalledWith('female');
-    el.querySelector<HTMLInputElement>('input[type=radio][value=male]')!.click();
-    buttonByText(el, '声を録音する')!.click();
-    expect(onStart).toHaveBeenLastCalledWith('male');
+    for (const sex of ['female', 'male'] as const) {
+      const el = renderStart(onStart);
+      el.querySelector<HTMLInputElement>(`input[type=radio][value=${sex}]`)!.click();
+      buttonByText(el, '声を録音する')!.click();
+      expect(onStart).toHaveBeenLastCalledWith(sex);
+    }
+  });
+  it('disables 声を録音する after the first click (no parallel mic opens)', () => {
+    const onStart = vi.fn();
+    const b = buttonByText(renderStart(onStart), '声を録音する')!;
+    b.click();
+    b.click();
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(b.disabled).toBe(true);
   });
   it('has required copy', () => {
     const el = renderStart(noop);
@@ -284,10 +312,10 @@ describe('banned-word lint over all screens', () => {
     }
     for (const prov of [true, false]) for (const more of [true, false]) els.push(result({ provisionalNorms: prov, canRecordMore: more }));
     els.push(renderResult({ ...fb, sets: 3, strengths: [], focus: [], practice: [] }, new Array(12).fill(0), {
-      provisionalNorms: false, canRecordMore: false, onAgain: noop,
+      provisionalNorms: false, canRecordMore: false, onAgain: noop, onHome: noop,
     }));
     for (const e of MIC) els.push(renderMicError(e, noop));
-    for (const r of REASONS) els.push(renderRetry(r, noop));
+    for (const r of REASONS) els.push(renderRetry(r, noop, noop));
     for (const el of els) {
       expect(findBannedWords(el.textContent ?? '')).toEqual([]);
       for (const n of [el, ...Array.from(el.querySelectorAll('*'))]) {

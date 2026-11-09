@@ -46,9 +46,20 @@ async function recordSet(page: Page) {
   await expect(page.getByText('どうぞ')).toBeVisible({ timeout: 20_000 });
   await voice(page, 'speechMode', true);
   await page.waitForTimeout(8_000);
+  // The analysing message may be up only briefly: record whether it was ever shown.
+  await page.evaluate(() => {
+    const w = window as unknown as { __sawAnalyzing: boolean };
+    w.__sawAnalyzing = false;
+    new MutationObserver((_m, obs) => {
+      if (document.body.textContent?.includes('結果をまとめています')) { w.__sawAnalyzing = true; obs.disconnect(); }
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
   await page.getByRole('button', { name: '終了' }).click();
   await voice(page, 'speechMode', false);
 }
+
+const mic = (page: Page) => page.evaluate(() => (window as unknown as { __mic: { opens: number; stops: number } }).__mic);
+const sawAnalyzing = (page: Page) => page.evaluate(() => (window as unknown as { __sawAnalyzing: boolean }).__sawAnalyzing);
 
 async function firstSet(page: Page) {
   await page.goto('/');
@@ -75,6 +86,8 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await recordSet(page);
 
   await expect(page.locator('h2.headline')).toContainText('参考', { timeout: 30_000 });
+  expect(await sawAnalyzing(page)).toBe(true);
+  expect(await mic(page)).toEqual({ opens: 1, stops: 1 }); // the mic is closed on the result screen
   await expect(page.locator('svg.chart-bar rect.bar')).toHaveCount(12);
   await expect(page.locator('svg.chart-pie path')).toHaveCount(12);
   await expect(page.getByText('医療機関(耳鼻咽喉科)に相談してください')).toBeVisible();
@@ -89,12 +102,16 @@ test('three sets drop the 参考 label and the extra-set button', async ({ page 
   await firstSet(page);
   for (let i = 0; i < 2; i++) {
     if (i === 0) await expect(page.locator('h2.headline')).toContainText('参考');
+    expect(await mic(page)).toEqual({ opens: i + 1, stops: i + 1 });
     await page.getByRole('button', { name: 'もう1セット録音する' }).click();
     await recordSet(page);
     await expect(page.locator('h2.headline')).toBeVisible({ timeout: 30_000 });
   }
+  expect(await mic(page)).toEqual({ opens: 3, stops: 3 });
   await expect(page.locator('h2.headline')).not.toContainText('参考');
   await expect(page.getByRole('button', { name: 'もう1セット録音する' })).toHaveCount(0);
+  await page.getByRole('button', { name: '最初にもどる' }).click();
+  await expect(page.getByRole('button', { name: '声を録音する' })).toBeVisible();
 });
 
 test('mic denied shows the denied screen and goes back to start', async ({ page }) => {

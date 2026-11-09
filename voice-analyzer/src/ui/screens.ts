@@ -24,6 +24,22 @@ function button(label: string, onClick: () => void, cls = 'btn'): HTMLButtonElem
   return b;
 }
 
+/**
+ * A button that opens the microphone: it disables itself on the first click so a second tap
+ * cannot start a parallel open. The app always replaces the screen afterwards.
+ */
+function micButton(label: string, onClick: () => void): HTMLButtonElement {
+  const b = h('button', { type: 'button', class: 'btn primary' }, label);
+  b.addEventListener('click', () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    onClick();
+  });
+  return b;
+}
+
+const HOME_LABEL = '最初にもどる';
+
 function list(items: string[]): HTMLUListElement {
   return h('ul', {}, ...items.map((t) => h('li', {}, t)));
 }
@@ -66,7 +82,7 @@ export function renderStart(onStart: (sex: Sex) => void): HTMLElement {
       ...radios.map((r) => r.node),
       h('p', { class: 'note' }, '選んだ内容は、声の高さなどを比べる参考グループを決めるためだけに使います。'),
     ),
-    button('声を録音する', () => onStart(selected()), 'btn primary'),
+    micButton('声を録音する', () => onStart(selected())),
   );
 }
 
@@ -180,7 +196,7 @@ const hzRange = (i: number) => `${BAND_EDGES_HZ[i]}〜${BAND_EDGES_HZ[i + 1]} Hz
 export function renderResult(
   f: Feedback,
   bandShare: number[],
-  opts: { provisionalNorms: boolean; onAgain: () => void; canRecordMore: boolean },
+  opts: { provisionalNorms: boolean; onAgain: () => void; canRecordMore: boolean; onHome: () => void },
 ): HTMLElement {
   const note = h('p', { class: 'band-note', role: 'status' });
   let open = -1;
@@ -230,7 +246,8 @@ export function renderResult(
     ));
   }
   root.append(h('p', { class: 'notice' }, STOP_NOTICE));
-  if (opts.canRecordMore) root.append(button('もう1セット録音する', opts.onAgain, 'btn primary'));
+  if (opts.canRecordMore) root.append(micButton('もう1セット録音する', opts.onAgain));
+  root.append(button(HOME_LABEL, opts.onHome));
   root.append(h('footer', { class: 'footer' }, FIXED_FOOTER));
   return root;
 }
@@ -279,10 +296,13 @@ const RETRY_COPY: Record<GateReason | 'interrupted', string> = {
   interrupted: '録音が中断されました。もう一度録音してください。',
 };
 
-export function renderRetry(reason: GateReason | 'interrupted', onRetry: () => void): HTMLElement {
+export function renderRetry(
+  reason: GateReason | 'interrupted', onRetry: () => void, onHome: () => void,
+): HTMLElement {
   return h('section', { class: 'screen notice-screen' },
     h('h1', {}, 'もう一度録音しましょう'),
     h('p', {}, RETRY_COPY[reason]),
-    button('もう一度録音する', onRetry, 'btn primary'),
+    micButton('もう一度録音する', onRetry),
+    button(HOME_LABEL, onHome),
   );
 }

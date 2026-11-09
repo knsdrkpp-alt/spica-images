@@ -5,7 +5,9 @@
  */
 export function installFakeMic(): void {
   type Voice = { on(): void; off(): void; speechMode(v: boolean): void };
-  const w = window as unknown as { __voice: Voice };
+  type Mic = { opens: number; stops: number };
+  const w = window as unknown as { __voice: Voice; __mic: Mic };
+  w.__mic = { opens: 0, stops: 0 };
   let state: { ctx: AudioContext; gain: GainNode; dest: MediaStreamAudioDestinationNode } | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -60,8 +62,16 @@ export function installFakeMic(): void {
   navigator.mediaDevices.getUserMedia = async () => {
     const s = ensure();
     await s.ctx.resume();
-    const stream = new MediaStream(s.dest.stream.getAudioTracks());
+    // A clone per open: the app stops the track on release and reopens the mic for the next set.
+    const stream = new MediaStream(s.dest.stream.getAudioTracks().map((t) => t.clone()));
     const track = stream.getAudioTracks()[0];
+    w.__mic.opens++;
+    const origStop = track.stop.bind(track);
+    let stopped = false;
+    track.stop = () => {
+      if (!stopped) { stopped = true; w.__mic.stops++; }
+      origStop();
+    };
     const orig = track.getSettings.bind(track);
     track.getSettings = () => ({
       ...orig(), echoCancellation: false, noiseSuppression: false, autoGainControl: false,

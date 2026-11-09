@@ -110,7 +110,7 @@ describe('App', () => {
     expect(SENTENCE_MAX_SECONDS).toBe(12);
   });
 
-  it('(a) one full set shows a provisional result', async () => {
+  it('(a) one full set shows a provisional result with the mic closed', async () => {
     const rec = fakeRecorder(fullSet());
     const { root } = setup(rec);
     expect(root.textContent).toContain('声を録音する');
@@ -118,23 +118,27 @@ describe('App', () => {
     await flush();
     expect(headline(root)).toContain('参考');
     expect(root.textContent).toContain('もう1セット');
-    expect(rec.release).not.toHaveBeenCalled();
+    expect(root.textContent).toContain('最初にもどる');
+    expect(rec.release).toHaveBeenCalledTimes(1);
   });
 
-  it('(b) three sets drop the reference note and the extra-set button, releasing once', async () => {
+  it('(b) three sets drop the reference note and the extra-set button; the mic is reopened per set and closed after each', async () => {
     const rec = fakeRecorder([...fullSet(), ...fullSet(), ...fullSet()]);
-    const { root } = setup(rec);
+    const { root, openRecorder } = setup(rec);
     click(root, '声を録音する');
     await flush();
+    expect(rec.release).toHaveBeenCalledTimes(1);
     click(root, 'もう1セット');
+    expect(openRecorder).toHaveBeenCalledTimes(2); // synchronously, inside the click (user gesture)
     await flush();
-    expect(rec.release).not.toHaveBeenCalled();
+    expect(rec.release).toHaveBeenCalledTimes(2);
     click(root, 'もう1セット');
+    expect(openRecorder).toHaveBeenCalledTimes(3);
     await flush();
     expect(headline(root)).not.toContain('参考');
     expect(headline(root)).not.toBe('');
     expect(root.textContent).not.toContain('もう1セット');
-    expect(rec.release).toHaveBeenCalledTimes(1);
+    expect(rec.release).toHaveBeenCalledTimes(3);
   });
 
   it('(c) mic error shows the error screen without throwing, and returns to start', async () => {
@@ -160,10 +164,11 @@ describe('App', () => {
     expect(root.textContent).toContain('もう一度録音しましょう');
     expect(root.textContent).toMatch(/声が聞き取れませんでした|声が小さく録音されました/);
     expect(root.querySelector('.headline')).toBeNull();
-    expect(rec.release).not.toHaveBeenCalled();
+    expect(rec.release).toHaveBeenCalledTimes(1);
     click(root, 'もう一度録音する');
     await flush();
     expect(headline(root)).toContain('参考'); // one stored set only
+    expect(rec.release).toHaveBeenCalledTimes(2);
   });
 
   it('(e) interruption abandons the set; a late stop() cannot replace the retry screen', async () => {
@@ -176,6 +181,7 @@ describe('App', () => {
     expect(rec.stop).toHaveBeenCalledTimes(1);
     rec.onInterrupted!();
     expect(rec.discard).toHaveBeenCalled();
+    expect(rec.release).toHaveBeenCalledTimes(1);
     expect(root.textContent).toContain('録音が中断されました');
     late(goodVowel());
     await flush();
@@ -318,5 +324,75 @@ describe('App', () => {
     go();
     await flush();
     expect(headline(root)).toContain('参考');
+  });
+
+  it('closes the mic before analysing (while the analysing message is up)', async () => {
+    const rec = fakeRecorder(fullSet());
+    let paint!: () => void;
+    const { root } = setup(rec, { yieldToPaint: () => new Promise<void>((res) => { paint = res; }) });
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).toContain('結果をまとめています');
+    expect(rec.release).toHaveBeenCalledTimes(1);
+    paint();
+    await flush();
+    expect(headline(root)).toContain('参考');
+    expect(rec.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed reopen on もう1セット shows the mic error screen, which goes back to start', async () => {
+    const rec = fakeRecorder(fullSet());
+    const { root, openRecorder } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    openRecorder.mockImplementationOnce(async () => ({ error: 'no-device' as MicError }));
+    click(root, 'もう1セット');
+    await flush();
+    expect(root.textContent).toContain('マイクが見つかりません');
+    click(root, '説明にもどる');
+    expect(root.textContent).toContain('声を録音する');
+  });
+
+  it('a failed reopen on もう一度録音する shows the mic error screen', async () => {
+    const rec = fakeRecorder([() => silentVowel(), goodSentence]);
+    const { root, openRecorder } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    openRecorder.mockImplementationOnce(async () => ({ error: 'denied' as MicError }));
+    click(root, 'もう一度録音する');
+    await flush();
+    expect(root.textContent).toContain('マイクが許可されていません');
+  });
+
+  it('最初にもどる on the result and retry screens returns to start and clears the sets', async () => {
+    const rec = fakeRecorder([...fullSet(), () => silentVowel(), goodSentence, ...fullSet()]);
+    const { root, openRecorder } = setup(rec);
+    click(root, '声を録音する');
+    await flush();
+    click(root, '最初にもどる');
+    expect(root.textContent).toContain('声を録音する');
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).toContain('もう一度録音しましょう');
+    click(root, '最初にもどる');
+    expect(root.textContent).toContain('声を録音する');
+    click(root, '声を録音する');
+    await flush();
+    expect(headline(root)).toContain('参考'); // earlier set was cleared
+    expect(openRecorder).toHaveBeenCalledTimes(3);
+    expect(rec.release).toHaveBeenCalledTimes(3);
+  });
+
+  it('pagehide during a recording releases the mic and shows the interrupted screen', async () => {
+    const rec = fakeRecorder(fullSet());
+    const sleep = (ms: number) => (ms === REST_SECONDS * 1000 ? new Promise<void>(() => {}) : Promise.resolve());
+    const { root } = setup(rec, { sleep });
+    click(root, '声を録音する');
+    await flush();
+    expect(root.textContent).toContain('ひと息ついてください');
+    window.dispatchEvent(new Event('pagehide'));
+    expect(rec.release).toHaveBeenCalledTimes(1);
+    expect(root.textContent).toContain('録音が中断されました');
+    expect(root.textContent).toContain('最初にもどる');
   });
 });
