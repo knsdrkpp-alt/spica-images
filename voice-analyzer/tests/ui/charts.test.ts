@@ -233,5 +233,4 @@ describe('renderPolarChart', () => {
     expect(width(9)).toBeGreaterThan(width(3)); // 藍 vs 黄
     expect(lines[9].classList.contains('ring-line-dim')).toBe(true);
   });
-;
 });
