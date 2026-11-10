@@ -1,0 +1,135 @@
+:root {
+  --bg: #ffffff;
+  --fg: #222222;
+  --muted: #5a5a5a;
+  --accent: #c8213c;
+  --accent-fg: #ffffff;
+  --border: #d9d9d9;
+  --focus: #1a5fb4;
+  --surface: #f6f4f2;
+  --serif: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
+  --sans: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: light; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+#app { max-width: 480px; margin: 0 auto; padding: 24px 16px 48px; }
+
+h1, h2, h3 { font-family: var(--serif); line-height: 1.4; }
+h1 { font-size: 1.6rem; margin: 0 0 16px; color: var(--accent); }
+h2 { font-size: 1.2rem; margin: 24px 0 8px; }
+h3 { font-size: 1.05rem; margin: 20px 0 6px; }
+.headline { font-size: 1.4rem; margin-top: 0; }
+p { margin: 8px 0; }
+.retry-detail { color: var(--muted); font-size: 0.8125rem; }
+.note { color: var(--muted); font-size: 0.875rem; }
+
+.notice { background: var(--surface); border-left: 4px solid var(--border); padding: 8px 12px; border-radius: 4px; }
+.notice h2, .notice h3 { margin-top: 4px; }
+
+.btn {
+  display: block; width: 100%; min-height: 48px; margin: 16px 0 0; padding: 10px 16px;
+  font: inherit; font-weight: 600; color: var(--accent); background: var(--bg);
+  border: 2px solid var(--accent); border-radius: 8px; cursor: pointer;
+}
+.btn.primary { color: var(--accent-fg); background: var(--accent); }
+.btn[hidden] { display: none; }
+
+button:focus-visible, input:focus-visible {
+  outline: 3px solid var(--focus); outline-offset: 2px;
+}
+
+fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px 0 0; padding: 8px 12px 12px; }
+.radio { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.radio input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+.chart { width: 100%; height: auto; display: block; }
+
+/* Dark "space" cards: only the colour graphs use them. */
+.graph-card {
+  background: radial-gradient(circle at 50% 42%, #0f2a5e 0%, #07122e 55%, #030816 100%);
+  border-radius: 12px; padding: 8px; margin: 12px 0;
+}
+.graph-card .chart-bar, .graph-card .chart-pie { padding: 6px; }
+.chart-polar .stars circle { fill: #ffffff; }
+.chart-polar .guide { fill: none; stroke: rgba(255, 255, 255, 0.16); stroke-width: 1; }
+.chart-polar .divider { stroke: rgba(255, 255, 255, 0.3); stroke-width: 1; }
+/* Numbers use a lightened tint of their colour (lightenForDark) with a subtle dark halo. */
+.chart-polar .share-number { font-family: var(--serif); stroke: rgba(3, 8, 22, 0.75); stroke-width: 2px; paint-order: stroke; }
+.chart-polar .ring-line-dim { filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.55)); }
+.chart-polar .polar-empty { fill: #ffffff; }
+.graph-card .axis { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+.graph-card .bar-value, .graph-card .bar-name { fill: #ffffff; }
+.graph-card .pie-label { font-weight: 700; fill: #ffffff; stroke: #07122e; stroke-width: 3px; paint-order: stroke; }
+.graph-card .wedge { stroke: #07122e; stroke-width: 1; }
+.graph-card .pie-empty { fill: rgba(255, 255, 255, 0.08); stroke: rgba(255, 255, 255, 0.3); }
+.chart-pie { max-width: 300px; margin: 0 auto; }
+
+.graph-controls { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 16px 0 4px; }
+.control-group { border: none; margin: 0; padding: 0; min-width: 0; }
+.control-group legend { padding: 0; font-size: 0.875rem; color: var(--muted); }
+.toggles { display: flex; gap: 8px; }
+.toggle {
+  min-height: 44px; min-width: 64px; padding: 6px 14px; font: inherit; font-size: 0.9375rem;
+  color: var(--fg); background: var(--bg); border: 1px solid #888888; border-radius: 8px; cursor: pointer;
+}
+.toggle[aria-pressed="true"] { color: #ffffff; background: #333333; border-color: #333333; }
+.check { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 0.9375rem; }
+.check input { width: 22px; height: 22px; margin: 0; accent-color: #333333; }
+.ring-swatch { display: inline-block; flex: none; width: 18px; border-radius: 2px; }
+.ring-swatch-outer { height: 4px; background: #333333; }
+.ring-swatch-inner { height: 2px; background: #999999; }
+.rank { font-size: 1rem; font-weight: 600; margin: 4px 0; }
+.graph-guide { font-size: 0.875rem; color: var(--fg); }
+
+.legend { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.legend-item {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px;
+  font: inherit; font-size: 0.875rem; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer; text-align: left;
+}
+.legend-item[aria-expanded="true"] { border-color: var(--fg); background: var(--surface); }
+.swatch { flex: none; width: 18px; height: 18px; border-radius: 4px; }
+.band-note { min-height: 1.7em; }
+
+.wave { width: 100%; height: 80px; background: var(--surface); border-radius: 8px; margin-top: 16px; }
+.wave polyline { stroke: var(--accent); stroke-width: 1.5; }
+.status { font-weight: 600; }
+.prompt { font-family: var(--serif); font-size: 1.25rem; }
+
+.footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; }
+
+.notice-screen h1 { color: var(--fg); }
+.remaining { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.birth { margin: 20px 0 0; }
+.birth label { display: block; font-weight: 600; }
+.birth input[type="date"] {
+  display: block; width: 100%; min-height: 44px; margin: 6px 0 0; padding: 6px 10px;
+  font: inherit; color: var(--fg); background: var(--bg); border: 1px solid #888888; border-radius: 8px;
+}
+
+/* 「声と数のあいだ」: a quiet, neutral card (no accent colour, no warning look). */
+.reading-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px 16px; margin: 24px 0 8px; }
+.reading-card h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reading-card h4 { font-family: var(--serif); font-size: 1rem; margin: 18px 0 4px; }
+.reading-card .tag { font-family: var(--sans); font-size: 0.75rem; font-weight: 600; color: var(--muted); border: 1px solid var(--muted); border-radius: 999px; padding: 0 8px; }
+.reading-disclaimer { color: var(--fg); font-size: 0.875rem; }
+.reading-number { display: flex; align-items: baseline; gap: 12px; margin: 12px 0 4px; }
+.reading-num { font-family: var(--serif); font-size: 3rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.reading-num-title { font-family: var(--serif); font-size: 1.125rem; font-weight: 600; }
+.reading-color { margin: 8px 0 12px; padding-left: 12px; border-left: 3px solid var(--border); }
+.reading-color-head { font-weight: 600; margin-bottom: 0; }
+.reading-card ol { padding-left: 1.4em; margin: 4px 0 0; }
+.reading-card li { margin: 6px 0; }
