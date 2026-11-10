@@ -118,9 +118,9 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   // 声と数のあいだ: the optional card for the birth date typed on the start screen.
   const card = page.getByRole('region', { name: /声と数のあいだ/ });
   await expect(card).toBeVisible();
-  await expect(card.getByText('娯楽・自己理解のための読み物です。科学的な根拠は確認されていません。')).toBeVisible();
+  await expect(card.getByText('娯楽・自己理解のための読み物です。数秘術にも、声の色の見立てにも、科学的な根拠はありません。声の色の見立ては、このアプリ独自のものです。')).toBeVisible();
   await expect(card.locator('.reading-num')).toHaveText('9');
-  await expect(card.getByText('いちばん強かった帯:')).toBeVisible();
+  await expect(card.getByText('多めだった帯:')).toBeVisible();
   await expect(card.locator('ol > li')).toHaveCount(3);
   expect(await noHScroll(page)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('result-reading.png'), fullPage: true });

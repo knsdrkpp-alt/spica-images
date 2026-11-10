@@ -521,7 +521,7 @@ describe('App', () => {
       // the colour parts come from the same averaged sentence curve as the polar chart
       const curve = meanCurveDb([extractSentence(goodSentence().samples, SR).spectrumDb]);
       const expected = readingOrNull(9, colorShares(curve, 6))!;
-      expect(card.textContent).toContain(`いちばん強かった帯:${expected.strongest.name}(約${expected.strongest.share}%)`);
+      expect(card.textContent).toContain(`多めだった帯:${expected.strongest.name}(約${expected.strongest.share}%)`);
       const article = root.querySelector('article')!;
       expect(count(article.textContent!, FIXED_FOOTER)).toBe(1);
       expect(count(article.textContent!, STOP_NOTICE)).toBe(1);

@@ -65,7 +65,7 @@ export function renderStart(onStart: (sex: Sex, birth: BirthDate | null) => void
   const selected = (): Sex =>
     (radios.find((r) => r.input.checked)?.input.value as Sex | undefined) ?? 'unspecified';
 
-  const birthInput = h('input', { type: 'date', id: 'birth-date', name: 'birth', min: '1900-01-01', max: todayIso() });
+  const birthInput = h('input', { type: 'date', autocomplete: 'off', id: 'birth-date', name: 'birth', min: '1900-01-01', max: todayIso() });
   const birth = (): BirthDate | null => parseBirthDate(birthInput.value);
 
   return h('section', { class: 'screen start' },
@@ -229,10 +229,10 @@ export interface ResultOptions {
   reading?: Reading | null;
 }
 
-function renderColorReading(label: string, c: Reading['strongest']): HTMLElement {
+function renderColorReading(label: string, glossLabel: string, c: Reading['strongest']): HTMLElement {
   return h('div', { class: 'reading-color' },
     h('p', { class: 'reading-color-head' }, `${label}:${c.name}(約${c.share}%)`),
-    h('p', {}, h('strong', {}, c.title)),
+    h('p', {}, glossLabel, h('strong', {}, c.title)),
     h('p', {}, c.text),
   );
 }
@@ -240,16 +240,16 @@ function renderColorReading(label: string, c: Reading['strongest']): HTMLElement
 /** The optional 「声と数のあいだ」 card. Text only (textContent), neutral styling. */
 export function renderReading(r: Reading): HTMLElement {
   return h('section', { class: 'reading-card', role: 'region', 'aria-label': '声と数のあいだ(読み物)' },
-    h('h3', {}, '声と数のあいだ', h('span', { class: 'tag' }, '読み物')),
+    h('h3', {}, '声と数のあいだ', h('span', { class: 'tag', 'aria-hidden': 'true' }, '読み物')),
     h('p', { class: 'reading-disclaimer' }, r.disclaimer),
-    h('div', { class: 'reading-number' },
-      h('span', { class: 'reading-num' }, String(r.life)),
-      h('span', { class: 'reading-num-title' }, r.numberTitle),
+    h('div', { class: 'reading-number', role: 'group', 'aria-label': `数秘術の数 ${r.life}:${r.numberTitle}` },
+      h('span', { class: 'reading-num', 'aria-hidden': 'true' }, String(r.life)),
+      h('span', { class: 'reading-num-title', 'aria-hidden': 'true' }, r.numberTitle),
     ),
     h('p', {}, r.numberText),
-    h('h4', {}, '声に出ていたこと'),
-    renderColorReading('いちばん強かった帯', r.strongest),
-    renderColorReading('弱めに出ていた帯', r.weakest),
+    h('h4', {}, '今回の録音の色の割合'),
+    renderColorReading('多めだった帯', '多めだった帯の見立て:', r.strongest),
+    renderColorReading('少なめだった帯', '少なめだった帯の見立て:', r.weakest),
     h('h4', {}, 'ふりかえりの問い'),
     h('ol', {}, ...r.questions.map((q) => h('li', {}, q))),
   );

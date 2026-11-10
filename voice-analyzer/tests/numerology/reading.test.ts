@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BANNED_WORDS,
-} from '../../src/diagnosis/copy';
-import {
-  COLOR_THEMES, EXTRA_BANNED_STEMS, HEDGE_PHRASES, NUMBER_THEMES, QUESTION_TEMPLATES, READING_DISCLAIMER,
+  COLOR_THEMES, HEDGE_PHRASES, NUMBER_THEMES, QUESTION_TEMPLATES, READING_DISCLAIMER,
 } from '../../src/numerology/copy';
 import { buildReading, readingOrNull } from '../../src/numerology/reading';
+import { renderReading } from '../../src/ui/screens';
+import { forbiddenIn } from '../helpers/forbidden';
 import type { LifePath } from '../../src/numerology/life-path';
 
 const LIFES: LifePath[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 22, 33];
@@ -27,8 +26,14 @@ describe('themes', () => {
       expect(t.text.length).toBeGreaterThan(40);
     }
   });
-  it('every text is hedged', () => {
-    for (const t of themes) expect(HEDGE_PHRASES.some((p) => t.text.includes(p)), t.key).toBe(true);
+  it('every number text is hedged; every colour text is framed as the app\'s own metaphor', () => {
+    for (const n of LIFES) expect(HEDGE_PHRASES.some((p) => NUMBER_THEMES[n].text.includes(p)), String(n)).toBe(true);
+    for (const c of COLORS) {
+      expect(COLOR_THEMES[c].text).toContain('にたとえています');
+      expect(COLOR_THEMES[c].text).toContain('読み物としての見立て');
+      expect(COLOR_THEMES[c].text).not.toContain('語られ');
+      expect(COLOR_THEMES[c].text).toContain(`${c}の帯`);
+    }
   });
   it('number texts are attributed to numerology and give 3 or 4 sentences', () => {
     for (const n of LIFES) {
@@ -47,11 +52,7 @@ describe('themes', () => {
     }
   });
   it('contains no banned words, banned stems or verdict / health / money / love / fortune wording', () => {
-    const forbidden = [
-      ...BANNED_WORDS, ...EXTRA_BANNED_STEMS,
-      'あなた', 'になります', 'です。あなた', '本当の自分', '本質', '健康', '病', 'お金', '金運', '収入', '稼', '恋', '結婚', '運命', '幸運', '開運', '寿命', '成功', '必ず',
-    ];
-    for (const s of allStrings) for (const w of forbidden) expect(s.includes(w), `${w} in ${s}`).toBe(false);
+    for (const s of allStrings) expect(forbiddenIn(s), s).toEqual([]);
   });
 });
 
@@ -64,7 +65,7 @@ describe('buildReading', () => {
     expect(r.numberText).toBe(NUMBER_THEMES[9].text);
     expect(r.strongest).toEqual({ name: '橙', share: 30, ...COLOR_THEMES.橙 });
     expect(r.weakest).toEqual({ name: '黄', share: 5, ...COLOR_THEMES.黄 });
-    expect(r.disclaimer).toBe('娯楽・自己理解のための読み物です。科学的な根拠は確認されていません。');
+    expect(r.disclaimer).toBe('娯楽・自己理解のための読み物です。数秘術にも、声の色の見立てにも、科学的な根拠はありません。声の色の見立ては、このアプリ独自のものです。');
   });
   it('ties: strongest is the higher frequency, weakest is the last of the ranking', () => {
     const r = buildReading(4, [20, 20, 20, 20, 10, 10]);
@@ -90,5 +91,28 @@ describe('readingOrNull', () => {
   });
   it('gives a reading otherwise', () => {
     expect(readingOrNull(9, [0, 0, 0, 0, 0, 100])!.strongest.name).toBe('紫');
+  });
+});
+
+describe('rendered card lint', () => {
+  const dists = [
+    [10, 30, 5, 20, 25, 10], [0, 0, 5, 15, 30, 50], [50, 30, 10, 5, 3, 2], [20, 20, 20, 20, 10, 10], [0, 0, 0, 0, 0, 100],
+  ];
+  const attrs = (root: Element) =>
+    [root, ...Array.from(root.querySelectorAll('*'))].flatMap((n) => Array.from(n.attributes).map((a) => a.value));
+  it('has no forbidden word in text or any attribute, for all numbers and several distributions', () => {
+    for (const n of LIFES) for (const d of dists) {
+      const el = renderReading(buildReading(n, d));
+      expect(forbiddenIn(el.textContent ?? ''), `${n} text`).toEqual([]);
+      for (const v of attrs(el)) expect(forbiddenIn(v), `${n} attr ${v}`).toEqual([]);
+    }
+  });
+  it('the lint would catch a planted word in an attribute or in the text', () => {
+    const el = renderReading(buildReading(9, dists[0]));
+    el.querySelector('.reading-number')!.setAttribute('aria-label', '診断');
+    el.querySelector('h3')!.setAttribute('title', '健康');
+    expect(attrs(el).flatMap(forbiddenIn)).toEqual(['健康', '診断']);
+    el.append('性格');
+    expect(forbiddenIn(el.textContent ?? '')).toEqual(['性格']);
   });
 });

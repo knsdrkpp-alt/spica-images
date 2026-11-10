@@ -340,6 +340,7 @@ describe('renderStart birth date', () => {
     const input = dateInput(el);
     expect(input).not.toBeNull();
     expect(input.required).toBe(false);
+    expect(input.getAttribute('autocomplete')).toBe('off');
     expect(input.min).toBe('1900-01-01');
     expect(input.max).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const label = el.querySelector<HTMLLabelElement>(`label[for="${input.id}"]`)!;
@@ -371,14 +372,19 @@ describe('renderReading and the result card', () => {
     expect(el.getAttribute('aria-label')).toContain('声と数のあいだ');
     expect(el.querySelector('h3')!.textContent).toBe('声と数のあいだ読み物');
     expect(el.querySelector('.tag')!.textContent).toBe('読み物');
+    expect(el.querySelector('.tag')!.getAttribute('aria-hidden')).toBe('true');
+    expect(el.getAttribute('aria-label')).toBe('声と数のあいだ(読み物)');
+    expect(el.querySelector('.reading-number')!.getAttribute('aria-label')).toBe('数秘術の数 9:見渡して手放す');
     expect(el.querySelector('h3')!.nextElementSibling!.textContent).toBe(
-      '娯楽・自己理解のための読み物です。科学的な根拠は確認されていません。');
+      '娯楽・自己理解のための読み物です。数秘術にも、声の色の見立てにも、科学的な根拠はありません。声の色の見立ては、このアプリ独自のものです。');
     expect(el.querySelector('.reading-num')!.textContent).toBe('9');
     expect(el.textContent).toContain(reading.numberTitle);
     expect(el.textContent).toContain(reading.numberText);
-    expect(el.textContent).toContain('声に出ていたこと');
-    expect(el.textContent).toContain('いちばん強かった帯:橙(約30%)');
-    expect(el.textContent).toContain('弱めに出ていた帯:黄(約5%)');
+    expect(el.textContent).toContain('今回の録音の色の割合');
+    expect(el.textContent).toContain('多めだった帯:橙(約30%)');
+    expect(el.textContent).toContain('少なめだった帯:黄(約5%)');
+    expect(el.textContent).toContain(`多めだった帯の見立て:${reading.strongest.title}`);
+    expect(el.textContent).toContain(`少なめだった帯の見立て:${reading.weakest.title}`);
     expect(el.textContent).toContain(reading.strongest.text);
     expect(el.textContent).toContain(reading.weakest.text);
     expect(el.textContent).toContain('ふりかえりの問い');
