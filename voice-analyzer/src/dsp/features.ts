@@ -2,7 +2,9 @@ import { READING_MORAE } from '../diagnosis/config';
 import type { PitchTrack, SentenceFeatures, TaskFeatures } from '../types';
 import { hzToSemitone, trackPitch, voicedMask } from './pitch';
 import { cpps, h1h2Db, hnrDb, stabilitySt } from './quality';
-import { alphaRatioDb, bandShares, longTermSpectrum, spectralCentroidHz } from './spectrum';
+import {
+  alphaRatioDb, bandShares, longTermSpectrum, spectralCentroidHz, spectrumCurveDb,
+} from './spectrum';
 
 const EDGE_SECONDS = 0.75;
 const MIN_STABLE_SECONDS = 1.5 + 1;
@@ -43,6 +45,7 @@ function analyse(samples: Float32Array, sampleRate: number, removeSilence: boole
     alphaRatioDb: finiteOr(alphaRatioDb(spec), 0),
     centroidHz: finiteOr(spectralCentroidHz(spec), 0),
     bandShare: bandShares(spec).map((v) => finiteOr(v, 0)),
+    spectrumDb: spectrumCurveDb(spec),
     voicedSeconds: voiced.length * track.hopSeconds,
   };
   if (!enough) return base;

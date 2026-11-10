@@ -6,6 +6,9 @@ import {
   alphaRatioDb,
   spectralCentroidHz,
   spectrumFrameLayout,
+  spectrumCurveDb,
+  SPECTRUM_FLOOR_DB,
+  SPECTRUM_POINTS,
 } from '../../src/dsp/spectrum';
 import { fft } from '../../src/dsp/fft';
 
@@ -144,5 +147,41 @@ describe('spectrumFrameCount', () => {
     expect(spectrumFrameCount(frameLength, 16000)).toBe(1);
     expect(spectrumFrameCount(frameLength + hop, 16000)).toBe(2);
     expect(spectrumFrameCount(16000, 16000)).toBe(Math.floor((16000 - frameLength) / hop) + 1);
+  });
+});
+
+describe('spectrumCurveDb', () => {
+  const peakIdx = Math.round((240 * Math.log(1000 / 100)) / Math.log(80));
+  it('has 240 finite points', () => {
+    const x = harmonicTone({ f0: 150, seconds: 1, sampleRate: 16000 });
+    const c = spectrumCurveDb(longTermSpectrum(x, 16000));
+    expect(c).toHaveLength(240);
+    expect(c.every(Number.isFinite)).toBe(true);
+    expect(SPECTRUM_POINTS).toBe(240);
+  });
+  it('a 1 kHz tone peaks at the expected index, at every sample rate', () => {
+    for (const sr of [16000, 44100, 48000]) {
+      const x = harmonicTone({ f0: 1000, seconds: 1, sampleRate: sr, harmonics: 1 });
+      const c = spectrumCurveDb(longTermSpectrum(x, sr));
+      expect(Math.abs(argmax(c) - peakIdx), `sr ${sr}`).toBeLessThanOrEqual(2);
+    }
+  });
+  it('silence and no voiced frames give the floor everywhere', () => {
+    expect(spectrumCurveDb(longTermSpectrum(silence(1, 16000), 16000))).toEqual(new Array(240).fill(SPECTRUM_FLOOR_DB));
+    const x = harmonicTone({ f0: 200, seconds: 1, sampleRate: 16000 });
+    const none = spectrumCurveDb(longTermSpectrum(x, 16000, new Array(100).fill(false)));
+    expect(none).toEqual(new Array(240).fill(-120));
+  });
+  it('a 200 Hz tone is lower around 5 kHz than at 200 Hz', () => {
+    const x = harmonicTone({ f0: 200, seconds: 1, sampleRate: 16000, harmonics: 1 });
+    const c = spectrumCurveDb(longTermSpectrum(x, 16000));
+    const at = (hz: number) => c[Math.floor((240 * Math.log(hz / 100)) / Math.log(80))];
+    expect(at(5000)).toBeLessThan(at(200));
+  });
+  it('points above Nyquist take the floor (8 kHz recording)', () => {
+    const x = harmonicTone({ f0: 300, seconds: 1, sampleRate: 8000 });
+    const c = spectrumCurveDb(longTermSpectrum(x, 8000));
+    expect(c[239]).toBe(SPECTRUM_FLOOR_DB);
+    expect(c.every(Number.isFinite)).toBe(true);
   });
 });

@@ -47,6 +47,7 @@ describe('extractVowel', () => {
     expect(f.bandShare).toHaveLength(12);
     expect(Math.abs(f.bandShare.reduce((a, b) => a + b, 0) - 1)).toBeLessThan(1e-6);
     expect(f.voicedSeconds).toBeGreaterThanOrEqual(3);
+    expect(f.spectrumDb).toHaveLength(240);
     expect(f.cpps).not.toBeNull();
     expect(f.f0StabilitySt).not.toBeNull();
     expectNoNaN(f);
@@ -59,6 +60,7 @@ describe('extractVowel', () => {
     expect(f.f0RangeSt).toBeNull();
     expect(f.hnrDb).toBeNull();
     expect(f.bandShare).toEqual(new Array(12).fill(0));
+    expect(f.spectrumDb).toEqual(new Array(240).fill(-120));
     expect(f.voicedSeconds).toBe(0);
   });
 
@@ -135,6 +137,8 @@ describe('extractSentence', () => {
     const f = extractSentence(x, sr);
     expect(f.speakingRate).toBeCloseTo(READING_MORAE / 10, 6);
     expect(f.articulationRate).toBeGreaterThan(f.speakingRate);
+    expect(f.spectrumDb).toHaveLength(240);
+    expect(f.spectrumDb!.every(Number.isFinite)).toBe(true);
     expectNoNaN(f);
   });
 

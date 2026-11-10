@@ -18,6 +18,11 @@ export interface TaskFeatures {
   centroidHz: number;
   /** length 12, sums to 1 */
   bandShare: number[];
+  /**
+   * Voiced long-term spectrum at 240 log-spaced points (100 Hz to 8 kHz), in dB; floor -120.
+   * Optional for hand-built fixtures; extractVowel and extractSentence always set it.
+   */
+  spectrumDb?: number[];
   voicedSeconds: number;
 }
 

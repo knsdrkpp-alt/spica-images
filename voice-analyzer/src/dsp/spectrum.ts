@@ -117,3 +117,48 @@ export function spectralCentroidHz(spec: Spectrum): number {
   }
   return den > 0 ? num / den : 0;
 }
+
+/** Floor value (dB) of the spectrum curve: silence, no voiced frames, or points above Nyquist. */
+export const SPECTRUM_FLOOR_DB = -120;
+/** Number of points of the spectrum curve (6 colours x 40 points). */
+export const SPECTRUM_POINTS = 240;
+export const SPECTRUM_LOW_HZ = 100;
+export const SPECTRUM_HIGH_HZ = 8000;
+
+/** Lower edge (Hz) of curve point i; i = SPECTRUM_POINTS gives the top edge (8 kHz). */
+export function spectrumPointEdgeHz(i: number): number {
+  return SPECTRUM_LOW_HZ * Math.pow(SPECTRUM_HIGH_HZ / SPECTRUM_LOW_HZ, i / SPECTRUM_POINTS);
+}
+
+/**
+ * The long-term spectrum resampled to 240 log-spaced points (100 Hz to 8 kHz), in dB (10*log10 power).
+ * A point narrower than a bin takes the power linearly interpolated at its geometric centre; a wider
+ * point averages the bins' power by overlap. Points above Nyquist, and silence, give SPECTRUM_FLOOR_DB.
+ */
+export function spectrumCurveDb(spec: Spectrum): number[] {
+  const n = spec.freqs.length;
+  const out = new Array<number>(SPECTRUM_POINTS).fill(SPECTRUM_FLOOR_DB);
+  if (n < 2) return out;
+  const df = spec.freqs[1] - spec.freqs[0];
+  const nyquist = spec.freqs[n - 1];
+  const toDb = (p: number) => {
+    const db = 10 * Math.log10(p);
+    return Number.isFinite(db) ? Math.max(SPECTRUM_FLOOR_DB, db) : SPECTRUM_FLOOR_DB;
+  };
+  for (let i = 0; i < SPECTRUM_POINTS; i++) {
+    const lo = spectrumPointEdgeHz(i);
+    const hi = spectrumPointEdgeHz(i + 1);
+    if (lo >= nyquist) continue;
+    let p: number;
+    if (hi - lo < df) {
+      const pos = Math.sqrt(lo * hi) / df;
+      const k = Math.min(n - 2, Math.floor(pos));
+      const t = Math.min(1, pos - k);
+      p = spec.power[k] * (1 - t) + spec.power[k + 1] * t;
+    } else {
+      p = bandEnergyOverlap(spec, lo, hi) / ((Math.min(hi, nyquist + df / 2) - lo) / df);
+    }
+    out[i] = toDb(p);
+  }
+  return out;
+}
