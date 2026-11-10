@@ -1,11 +1,14 @@
-import { BAND_COLORS, BAND_EDGES_HZ, GATE, READING_TEXT } from '../diagnosis/config';
+import { colorShares, colorsFor, rankColors } from '../diagnosis/colors';
+import { GATE, READING_TEXT } from '../diagnosis/config';
 import { FIXED_FOOTER, MULTI_SET_NOTE, PRACTICE_CADENCE, STOP_NOTICE } from '../diagnosis/copy';
 import type { Feedback } from '../diagnosis/feedback';
 import type { GateDetail, GateReason } from '../diagnosis/gate';
 import type { MicError } from '../audio/capture';
 import type { Sex } from '../types';
-import { BAND_NOTES } from './band-notes';
-import { renderBarChart, renderPieChart, svgEl } from './charts';
+import { BAND_NOTES, COLOR6_NOTES } from './band-notes';
+import {
+  renderBarChart, renderPieChart, renderPolarChart, svgEl, type PolarRing,
+} from './charts';
 
 type Child = string | Node;
 
@@ -191,8 +194,6 @@ export function renderRecording(onStop: () => void): RecordingView {
   return { el: view, setPhase, setReady, setRemaining, setWave };
 }
 
-const hzRange = (i: number) => `${BAND_EDGES_HZ[i]}〜${BAND_EDGES_HZ[i + 1]} Hz`;
-
 /** Measured values shown on the result screen; a null value is left out. */
 export interface Measures {
   f0Hz: number | null;
@@ -227,22 +228,121 @@ function renderMeasures(m: Measures): HTMLElement | null {
   );
 }
 
-export function renderResult(f: Feedback, bandShare: number[], opts: ResultOptions): HTMLElement {
+/** Averaged spectrum curves (240 points, dB) shown on the result screen. */
+export interface ResultCurves {
+  /** The read-aloud sentence: outer ring, and the source of the percentages. */
+  sentenceDb: number[];
+  /** The sustained 「あー」: inner ring. */
+  vowelDb: number[];
+}
+
+export const RING_LABELS = { outer: '外側:文の読み上げ', inner: '内側:「あー」' } as const;
+
+interface GraphState {
+  bands: 6 | 12;
+  outer: boolean;
+  inner: boolean;
+}
+
+const GRAPH_GUIDE =
+  '色は、低い音(赤)から高い音(紫)の順に並んでいます。円の外の数字は、それぞれの色の割合で、合計は100です。'
+  + '外側の輪は文の読み上げ(ふだんの話し声)、内側の輪は「あー」とのばした声の、周波数ごとの強さの形です。'
+  + '割合はこのアプリ独自の計算によるもので、録音した機種やマイクによって変わる、おおまかな目安です。';
+
+function darkCard(...children: Child[]): HTMLElement {
+  return h('div', { class: 'graph-card' }, ...children);
+}
+
+/** Legend of the current colours; tapping one shows its one-line note. */
+function renderLegend(bands: 6 | 12): HTMLElement {
+  const colors = colorsFor(bands);
+  const notes = bands === 6 ? COLOR6_NOTES : BAND_NOTES;
   const note = h('p', { class: 'band-note', role: 'status' });
   let open = -1;
-  const legendButtons = BAND_COLORS.map((color, i) => {
+  const label = (i: number) => `${colors[i].name}(${colors[i].lowHz}〜${colors[i].highHz} Hz)`;
+  const buttons = colors.map((color, i) => {
     const swatch = h('span', { class: 'swatch', 'aria-hidden': 'true' });
-    swatch.style.background = color;
-    const b = h('button', { type: 'button', class: 'legend-item', 'aria-expanded': 'false' },
-      swatch, `${i + 1}  ${hzRange(i)}`);
+    swatch.style.background = color.css;
+    const b = h('button', { type: 'button', class: 'legend-item', 'aria-expanded': 'false' }, swatch, label(i));
     b.addEventListener('click', () => {
       open = open === i ? -1 : i;
-      legendButtons.forEach((x, j) => x.setAttribute('aria-expanded', String(j === open)));
-      note.textContent = open === -1 ? '' : `${i + 1}(${hzRange(i)}):${BAND_NOTES[i]}`;
+      buttons.forEach((x, j) => x.setAttribute('aria-expanded', String(j === open)));
+      note.textContent = open === -1 ? '' : `${label(i)}:${notes[i]}`;
     });
     return b;
   });
+  return h('section', { class: 'legend-section' },
+    h('h3', {}, '色の凡例'),
+    h('p', { class: 'note' }, '色をタップすると、その帯域の一般的な傾向を表示します。音響的な裏づけは弱い、一般的な目安です。'),
+    h('div', { class: 'legend' }, ...buttons),
+    note,
+  );
+}
 
+/**
+ * The colour graphs with their controls. Toggling the colour count or a ring rebuilds only the
+ * graphs below the controls (renderResultGraphs), never the whole result screen.
+ */
+function renderGraphs(curves: ResultCurves): HTMLElement {
+  const state: GraphState = { bands: 6, outer: true, inner: true };
+  const body = h('div', { class: 'graphs-body' });
+
+  const modeButtons = ([6, 12] as const).map((bands) => {
+    const b = h('button', { type: 'button', class: 'toggle', 'aria-pressed': 'false' }, `${bands}色`);
+    b.addEventListener('click', () => {
+      if (state.bands === bands) return;
+      state.bands = bands;
+      renderResultGraphs();
+    });
+    return { bands, b };
+  });
+  const ringBox = (key: 'outer' | 'inner') => {
+    const input = h('input', { type: 'checkbox', name: `ring-${key}` });
+    input.checked = true;
+    input.addEventListener('change', () => {
+      state[key] = input.checked;
+      renderResultGraphs();
+    });
+    const line = h('span', { class: `ring-swatch ring-swatch-${key}`, 'aria-hidden': 'true' });
+    return h('label', { class: 'check' }, input, line, RING_LABELS[key]);
+  };
+
+  function renderResultGraphs(): void {
+    for (const m of modeButtons) m.b.setAttribute('aria-pressed', String(m.bands === state.bands));
+    const colors = colorsFor(state.bands);
+    const shares = colorShares(curves.sentenceDb, state.bands);
+    const rings: PolarRing[] = [];
+    if (state.outer) rings.push({ id: 'outer', label: RING_LABELS.outer, curveDb: curves.sentenceDb });
+    if (state.inner) rings.push({ id: 'inner', label: RING_LABELS.inner, curveDb: curves.vowelDb });
+    const ranked = shares.some((v) => v > 0)
+      ? `強い順:${rankColors(shares, colors.map((c) => c.name)).join(' → ')}`
+      : '強い順:今回の録音からは求められませんでした';
+    body.replaceChildren(
+      darkCard(renderPolarChart(rings, shares, { colors })),
+      h('p', { class: 'rank' }, ranked),
+      h('p', { class: 'graph-guide' }, GRAPH_GUIDE),
+      darkCard(renderBarChart(shares, { colors })),
+      darkCard(renderPieChart(shares, { colors })),
+      renderLegend(state.bands),
+    );
+  }
+
+  const controls = h('div', { class: 'graph-controls' },
+    h('fieldset', { class: 'control-group' },
+      h('legend', {}, '色の数'),
+      h('div', { class: 'toggles' }, ...modeButtons.map((m) => m.b)),
+    ),
+    h('fieldset', { class: 'control-group' },
+      h('legend', {}, '表示する輪'),
+      ringBox('outer'),
+      ringBox('inner'),
+    ),
+  );
+  renderResultGraphs();
+  return h('section', { class: 'graphs' }, controls, body);
+}
+
+export function renderResult(f: Feedback, curves: ResultCurves, opts: ResultOptions): HTMLElement {
   const root = h('article', { class: 'screen result' },
     h('h2', { class: 'headline' }, f.headline),
     h('p', {}, f.tendency),
@@ -252,22 +352,7 @@ export function renderResult(f: Feedback, bandShare: number[], opts: ResultOptio
     root.append(h('p', { class: 'notice' }, 'いまは仮の基準を使っているため、今後の調整で表示が変わることがあります。'));
   }
   for (const n of opts.notices) root.append(h('p', { class: 'notice' }, n));
-  root.append(
-    h('section', { class: 'charts' },
-      renderBarChart(bandShare),
-      renderPieChart(bandShare),
-    ),
-    h('section', { class: 'notice' },
-      h('h3', {}, 'グラフの読み方'),
-      h('p', {}, '棒グラフは帯域ごとの相対的な強さ、円グラフはその割合です。どちらも相対値で、録音した機種などによって変わる目安です。棒グラフの軸は相対的な0〜60の目盛りで、いちばん高い棒を60にそろえています(割合ではありません)。'),
-    ),
-    h('section', {},
-      h('h3', {}, '帯域の凡例'),
-      h('p', { class: 'note' }, '色をタップすると、その帯域の一般的な傾向を表示します。音響的な裏づけは弱い、一般的な目安です。'),
-      h('div', { class: 'legend' }, ...legendButtons),
-      note,
-    ),
-  );
+  root.append(renderGraphs(curves));
   const measures = renderMeasures(opts.measures);
   if (measures) root.append(measures);
   if (f.strengths.length) root.append(h('section', {}, h('h3', {}, 'よく出ている点'), list(f.strengths)));

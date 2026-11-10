@@ -6,8 +6,6 @@
   --accent-fg: #ffffff;
   --border: #d9d9d9;
   --focus: #1a5fb4;
-  --label: #111111;
-  --halo: #ffffff;
   --surface: #f6f4f2;
   --serif: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif JP", serif;
   --sans: system-ui, -apple-system, "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
@@ -56,14 +54,41 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
 .radio { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .radio input { width: 22px; height: 22px; accent-color: var(--accent); }
 
-.charts { display: grid; gap: 16px; margin: 16px 0; }
 .chart { width: 100%; height: auto; display: block; }
-.chart .axis { stroke: var(--border); stroke-width: 1; }
-.chart .tick { font-size: 10px; fill: var(--muted); }
-.chart .pie-label { font-size: 10px; font-weight: 700; fill: var(--label); stroke: var(--halo); stroke-width: 2.5px; paint-order: stroke; }
-.chart .wedge { stroke: var(--halo); stroke-width: 1; }
-.chart .pie-empty { fill: var(--surface); stroke: var(--border); }
-.chart-pie { max-width: 260px; margin: 0 auto; }
+
+/* Dark "space" cards: only the colour graphs use them. */
+.graph-card {
+  background: radial-gradient(circle at 50% 42%, #0f2a5e 0%, #07122e 55%, #030816 100%);
+  border-radius: 12px; padding: 8px; margin: 12px 0;
+}
+.graph-card .chart-bar, .graph-card .chart-pie { padding: 6px; }
+.chart-polar .stars circle { fill: #ffffff; }
+.chart-polar .guide { fill: none; stroke: rgba(255, 255, 255, 0.16); stroke-width: 1; }
+.chart-polar .divider { stroke: rgba(255, 255, 255, 0.3); stroke-width: 1; }
+.chart-polar .share-number { font-family: var(--serif); }
+.graph-card .axis { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+.graph-card .bar-value, .graph-card .bar-name { fill: #ffffff; }
+.graph-card .pie-label { font-weight: 700; fill: #ffffff; stroke: #07122e; stroke-width: 3px; paint-order: stroke; }
+.graph-card .wedge { stroke: #07122e; stroke-width: 1; }
+.graph-card .pie-empty { fill: rgba(255, 255, 255, 0.08); stroke: rgba(255, 255, 255, 0.3); }
+.chart-pie { max-width: 300px; margin: 0 auto; }
+
+.graph-controls { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 16px 0 4px; }
+.control-group { border: none; margin: 0; padding: 0; min-width: 0; }
+.control-group legend { padding: 0; font-size: 0.875rem; color: var(--muted); }
+.toggles { display: flex; gap: 8px; }
+.toggle {
+  min-height: 44px; min-width: 64px; padding: 6px 14px; font: inherit; font-size: 0.9375rem;
+  color: var(--fg); background: var(--bg); border: 1px solid #888888; border-radius: 8px; cursor: pointer;
+}
+.toggle[aria-pressed="true"] { color: #ffffff; background: #333333; border-color: #333333; }
+.check { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 0.9375rem; }
+.check input { width: 22px; height: 22px; margin: 0; accent-color: #333333; }
+.ring-swatch { display: inline-block; flex: none; width: 18px; border-radius: 2px; }
+.ring-swatch-outer { height: 4px; background: #333333; }
+.ring-swatch-inner { height: 2px; background: #999999; }
+.rank { font-size: 1rem; font-weight: 600; margin: 4px 0; }
+.graph-guide { font-size: 0.875rem; color: var(--fg); }
 
 .legend { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .legend-item {

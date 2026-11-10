@@ -4,6 +4,9 @@ import type { Recorder, MicError } from '../src/audio/capture';
 import norms from '../src/diagnosis/norms.json';
 import type { Norms } from '../src/diagnosis/profile';
 import { harmonicTone, silence } from './helpers/synth';
+import { extractSentence } from '../src/dsp/features';
+import { colorShares, meanCurveDb } from '../src/diagnosis/colors';
+import { BAND_EDGES_HZ } from '../src/diagnosis/config';
 
 // Pass-through spy: records what the screen showed when the (synchronous, slow) analysis started.
 const probe = vi.hoisted(() => ({ textAtExtractSentence: [] as string[] }));
@@ -465,7 +468,7 @@ describe('App', () => {
     expect(m.textContent).not.toMatch(/スピード|速さ/);
   });
 
-  it('the dominant band in よく出ている点 comes from the averaged band shares the charts show', async () => {
+  it('よく出ている点 uses the averaged 12-band shares; the graphs use the dB-averaged sentence curves', async () => {
     // set 1: low tone (strongest band low); set 2: high tone -> the mean decides, not the last set
     const lowSentence = (): Rec => {
       const parts: Float32Array[] = [];
@@ -483,12 +486,17 @@ describe('App', () => {
     await flush();
     click(root, 'もう1セット');
     await flush();
-    const bars = [...root.querySelectorAll('svg.chart-bar rect.bar')].map((r) => Number(r.getAttribute('height')));
-    expect(bars).toHaveLength(12);
-    const top = bars.indexOf(Math.max(...bars));
+    // よく出ている点 still describes the 12-band shares averaged over all sets.
+    const recs = [lowSentence(), lowSentence(), goodSentence()].map((r) => extractSentence(r.samples, SR));
+    const mean = recs[0].bandShare.map((_, i) => recs.reduce((acc, f) => acc + f.bandShare[i], 0));
+    const top = mean.indexOf(Math.max(...mean));
     const strengths = [...root.querySelectorAll('section')].find((x) => x.textContent?.includes('よく出ている点'))!;
-    const m = /約(\d+)〜(\d+) Hz/.exec(strengths.textContent!)!;
-    const legend = [...root.querySelectorAll('.legend-item')][top].textContent!;
-    expect(legend).toContain(`${m[1]}〜${m[2]} Hz`);
+    expect(strengths.textContent).toContain(`約${BAND_EDGES_HZ[top]}〜${BAND_EDGES_HZ[top + 1]} Hz`);
+    // The graphs show the colour shares of the sentence curves averaged in dB over all sets.
+    const expected = colorShares(meanCurveDb(recs.map((f) => f.spectrumDb)), 6);
+    const bars = [...root.querySelectorAll('svg.chart-bar .bar-value')].map((t) => Number(t.textContent));
+    expect(bars).toEqual(expected);
+    expect(bars.reduce((x, y) => x + y, 0)).toBe(100);
+    expect(root.querySelectorAll('svg.chart-polar g.ring')).toHaveLength(2);
   });
 });

@@ -1,5 +1,6 @@
 import type { MicError, Recorder } from './audio/capture';
 import { classify, medianProfile } from './diagnosis/classify';
+import { meanCurveDb } from './diagnosis/colors';
 import { buildFeedback } from './diagnosis/feedback';
 import { checkGate, type GateDetail } from './diagnosis/gate';
 import type { GateReason, GateWarning } from './diagnosis/gate';
@@ -237,8 +238,9 @@ export class App {
     const { sets, deps } = this;
     const profiles = sets.map((s) => toProfile(s, this.sex, deps.norms));
     const c = classify(profiles);
+    // The 12-band shares only feed the よく出ている点 text; the graphs use the dB spectrum curves.
     const bandShare = meanBandShare(sets);
-    // Describe the dominant band from the same averaged shares the charts show (stored set untouched).
+    // Describe the dominant band from the shares averaged over all sets (stored set untouched).
     const last = sets[sets.length - 1];
     const lastWithMean: SetFeatures = { ...last, sentence: { ...last.sentence, bandShare } };
     const f = buildFeedback(c, medianProfile(profiles), lastWithMean, sets.length);
@@ -247,7 +249,11 @@ export class App {
     if (this.warnings.some((w) => w.includes('noise-borderline'))) notices.push(NOTICE_NOISE);
     const f0Hz = median(sets.map((s) => s.sentence.f0MedianHz));
     const stabilitySt = median(sets.map((s) => s.vowel.f0StabilitySt));
-    this.show(renderResult(f, bandShare, {
+    const curves = {
+      sentenceDb: meanCurveDb(sets.map((s) => s.sentence.spectrumDb)),
+      vowelDb: meanCurveDb(sets.map((s) => s.vowel.spectrumDb)),
+    };
+    this.show(renderResult(f, curves, {
       provisionalNorms: deps.norms.provisional,
       canRecordMore: sets.length < MAX_SETS,
       onAgain: () => this.openAndRun(),

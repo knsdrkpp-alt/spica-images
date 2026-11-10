@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   renderStart, renderRecording, renderResult, renderMicError, renderRetry,
 } from '../../src/ui/screens';
-import { BAND_NOTES } from '../../src/ui/band-notes';
+import { BAND_NOTES, COLOR6_NOTES } from '../../src/ui/band-notes';
 import { findBannedWords, type Feedback } from '../../src/diagnosis/feedback';
 import {
   FIXED_FOOTER, MULTI_SET_NOTE, NOTICE_NOISE, NOTICE_PROCESSING, PRACTICE_CADENCE, STOP_NOTICE,
@@ -20,7 +20,10 @@ const fb: Feedback = {
   practice: [{ title: 'ウォームアップ', minutes: 2, how: 'ハミングで楽な声を出します。' }],
   sets: 1,
 };
-const share = new Array(12).fill(1 / 12);
+/** Sentence curve: peaks in the violet and red blocks; vowel curve 10 dB lower. */
+const sentenceDb = Array.from({ length: 240 }, (_, i) => (i < 40 ? -20 : i >= 200 ? -10 : -45));
+const share = { sentenceDb, vowelDb: sentenceDb.map((v) => v - 10) };
+const SILENT = { sentenceDb: new Array(240).fill(-120), vowelDb: new Array(240).fill(-120) };
 const noop = () => {};
 const NO_MEASURES = { f0Hz: null, f0Note: null, stabilityCent: null };
 const MEASURES = { f0Hz: 219.6, f0Note: 'A3', stabilityCent: 23 };
@@ -44,8 +47,9 @@ describe('renderResult', () => {
     expect(last.tagName).toBe('FOOTER');
     expect(last.textContent).toContain(FIXED_FOOTER);
     expect(el.querySelector('h2')!.textContent).toBe(fb.headline);
-    expect(el.querySelectorAll('svg')).toHaveLength(2);
-    expect(el.textContent).toContain('グラフの読み方');
+    expect(el.querySelectorAll('.graph-card svg')).toHaveLength(3);
+    expect(el.querySelectorAll('svg')).toHaveLength(3);
+    expect(el.textContent).not.toContain('グラフの読み方');
   });
   it('keeps STOP_NOTICE and footer exactly once even without practice steps', () => {
     const el = renderResult({ ...fb, practice: [] }, share, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES });
@@ -112,19 +116,109 @@ describe('renderResult', () => {
     expect(count(el.textContent!, PRACTICE_CADENCE)).toBe(1);
     expect(PRACTICE_CADENCE).toBe('週3〜5日、2〜4週ほど続けてから、もう一度チェックしてみてください。');
   });
-  it('legend buttons toggle band notes', () => {
+  it('legend shows the 6 colours with COLOR6_NOTES, and the 12 bands with BAND_NOTES in 12-colour mode', () => {
     const el = result();
-    const legend = el.querySelectorAll<HTMLButtonElement>('.legend button');
-    expect(legend).toHaveLength(12);
+    const legend = () => el.querySelectorAll<HTMLButtonElement>('.legend button');
+    expect(legend()).toHaveLength(6);
     expect(el.textContent).toContain('音響的な裏づけは弱い、一般的な目安です');
-    expect(el.textContent).not.toContain(BAND_NOTES[3]);
-    legend[3].click();
-    expect(el.textContent).toContain(`4(299〜431 Hz):${BAND_NOTES[3]}`);
-    expect(legend[3].textContent).toContain('4');
-    expect(legend[3].textContent).toContain('299〜431 Hz');
-    expect(legend[3].getAttribute('aria-expanded')).toBe('true');
-    legend[3].click();
-    expect(el.textContent).not.toContain(BAND_NOTES[3]);
+    expect(el.textContent).not.toContain(COLOR6_NOTES[2]);
+    legend()[2].click();
+    expect(el.textContent).toContain(`黄(431〜895 Hz):${COLOR6_NOTES[2]}`);
+    expect(legend()[2].getAttribute('aria-expanded')).toBe('true');
+    legend()[2].click();
+    expect(el.textContent).not.toContain(COLOR6_NOTES[2]);
+    buttonByText(el, '12色')!.click();
+    expect(legend()).toHaveLength(12);
+    legend()[3].click();
+    expect(el.textContent).toContain(`(299〜431 Hz):${BAND_NOTES[3]}`);
+    expect(legend()[3].textContent).toContain('299〜431 Hz');
+  });
+  it('orders headline, tendency, controls, polar card, ranking, guide, bar, pie, legend, then the rest', () => {
+    const el = result({ measures: MEASURES });
+    const flat = Array.from(el.querySelectorAll('*'));
+    const pos = (sel: string) => flat.indexOf(el.querySelector(sel)!);
+    const order = ['h2.headline', '.graph-controls', 'svg.chart-polar', '.rank', '.graph-guide',
+      'svg.chart-bar', 'svg.chart-pie', '.legend', '.measures', 'footer'];
+    const idx = order.map(pos);
+    expect(idx.every((v) => v >= 0)).toBe(true);
+    expect([...idx].sort((x, y) => x - y)).toEqual(idx);
+    expect(el.children[1].textContent).toBe(fb.tendency);
+    for (const c of ['svg.chart-polar', 'svg.chart-bar', 'svg.chart-pie']) {
+      expect(el.querySelector(c)!.parentElement!.classList.contains('graph-card')).toBe(true);
+    }
+  });
+  it('defaults to 6 colours with both rings; shares come from the sentence curve and sum to 100', () => {
+    const el = result();
+    expect(buttonByText(el, '6色')!.getAttribute('aria-pressed')).toBe('true');
+    expect(buttonByText(el, '12色')!.getAttribute('aria-pressed')).toBe('false');
+    const boxes = el.querySelectorAll<HTMLInputElement>('input[type=checkbox]');
+    expect(boxes).toHaveLength(2);
+    expect(Array.from(boxes).every((b) => b.checked)).toBe(true);
+    const labels = Array.from(el.querySelectorAll('label.check')).map((l) => l.textContent);
+    expect(labels).toEqual(['外側:文の読み上げ', '内側:「あー」']);
+    expect(el.querySelectorAll('svg.chart-polar g.ring')).toHaveLength(2);
+    const nums = Array.from(el.querySelectorAll('text.share-number')).map((t) => Number(t.textContent));
+    expect(nums).toHaveLength(6);
+    expect(nums.reduce((a, b) => a + b, 0)).toBe(100);
+    // violet (-10) is above red (-20) above the rest (-45)
+    expect(el.querySelector('.rank')!.textContent).toMatch(/^強い順:紫 → 赤 → /);
+    expect(el.querySelectorAll('svg.chart-bar rect.bar')).toHaveLength(6);
+    expect(el.querySelectorAll('svg.chart-pie path')).toHaveLength(6);
+  });
+  it('the guide explains colours, numbers and rings, hedged', () => {
+    const t = result().querySelector('.graph-guide')!.textContent!;
+    for (const w of ['低い音(赤)', '高い音(紫)', '合計は100', '外側の輪は文の読み上げ', '内側の輪は「あー」', '機種やマイク', '目安']) {
+      expect(t).toContain(w);
+    }
+  });
+  it('12色 re-renders the graphs with 12 colours without rebuilding the rest of the screen', () => {
+    const el = result();
+    const headline = el.querySelector('h2');
+    const controls = el.querySelector('.graph-controls');
+    const twelve = buttonByText(el, '12色')!;
+    twelve.click();
+    expect(twelve.getAttribute('aria-pressed')).toBe('true');
+    expect(buttonByText(el, '6色')!.getAttribute('aria-pressed')).toBe('false');
+    expect(el.querySelector('h2')).toBe(headline);
+    expect(el.querySelector('.graph-controls')).toBe(controls);
+    expect(el.querySelectorAll('svg.chart-bar rect.bar')).toHaveLength(12);
+    expect(el.querySelectorAll('svg.chart-pie path')).toHaveLength(12);
+    expect(el.querySelectorAll('text.share-number')).toHaveLength(12);
+    expect(el.querySelectorAll('svg')).toHaveLength(3);
+    buttonByText(el, '6色')!.click();
+    expect(el.querySelectorAll('svg.chart-bar rect.bar')).toHaveLength(6);
+    expect(count(el.textContent!, FIXED_FOOTER)).toBe(1);
+    expect(el.lastElementChild!.tagName).toBe('FOOTER');
+  });
+  it('unchecking a ring checkbox removes that ring only', () => {
+    const el = result();
+    document.body.replaceChildren(el); // jsdom fires change only for connected checkboxes
+    const [outer, inner] = Array.from(el.querySelectorAll<HTMLInputElement>('input[type=checkbox]'));
+    inner.click();
+    expect(inner.checked).toBe(false);
+    expect(el.querySelectorAll('svg.chart-polar g.ring-inner')).toHaveLength(0);
+    expect(el.querySelectorAll('svg.chart-polar g.ring-outer')).toHaveLength(1);
+    outer.click();
+    expect(el.querySelectorAll('svg.chart-polar g.ring')).toHaveLength(0);
+    inner.click();
+    expect(el.querySelectorAll('svg.chart-polar g.ring-inner')).toHaveLength(1);
+    buttonByText(el, '12色')!.click();
+    expect(el.querySelectorAll('svg.chart-polar g.ring-inner polyline')).toHaveLength(12);
+    expect(el.querySelectorAll('svg.chart-polar g.ring-outer')).toHaveLength(0);
+  });
+  it('a silent recording shows zeros without NaN and a neutral ranking line', () => {
+    const el = renderResult(fb, SILENT, { provisionalNorms: false, canRecordMore: true, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES });
+    expect(el.innerHTML).not.toContain('NaN');
+    expect(el.querySelector('.rank')!.textContent).not.toContain('→');
+  });
+  it('COLOR6_NOTES: 6 short notes, no impression, personality, ability or anatomy wording', () => {
+    expect(COLOR6_NOTES).toHaveLength(6);
+    for (const n of COLOR6_NOTES) {
+      expect(n.length).toBeLessThan(60);
+      expect(n).toContain('といわれます');
+      for (const stem of ['印象', '性格', '能力', '存在感', 'あたたか', 'きらびやか', '空気感', '胸']) expect(n).not.toContain(stem);
+    }
+    expect(findBannedWords(COLOR6_NOTES.join(''))).toEqual([]);
   });
   it('BAND_NOTES avoid impression, personality, ability and anatomy wording', () => {
     for (const stem of ['印象', '性格', '能力', '存在感', 'あたたか', 'きらびやか', '空気感', '胸']) {
@@ -373,7 +467,7 @@ describe('banned-word lint over all screens', () => {
       }
     }
     for (const prov of [true, false]) for (const more of [true, false]) els.push(result({ provisionalNorms: prov, canRecordMore: more }));
-    els.push(renderResult({ ...fb, sets: 3, strengths: [], focus: [], practice: [] }, new Array(12).fill(0), {
+    els.push(renderResult({ ...fb, sets: 3, strengths: [], focus: [], practice: [] }, SILENT, {
       provisionalNorms: false, canRecordMore: false, onAgain: noop, onHome: noop, notices: [], measures: NO_MEASURES,
     }));
     for (const sets of [1, 2, 3]) {
@@ -382,6 +476,11 @@ describe('banned-word lint over all screens', () => {
         notices: [NOTICE_PROCESSING, NOTICE_NOISE], measures: MEASURES,
       }));
     }
+    const twelve = result({ measures: MEASURES });
+    buttonByText(twelve, '12色')!.click();
+    document.body.replaceChildren(twelve);
+    twelve.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
+    els.push(twelve);
     for (const e of MIC) els.push(renderMicError(e, noop));
     const lintDetail = { snrDb: 17, noiseFloorDbfs: -48, speechDbfs: -31, peakDbfs: -38 };
     for (const r of REASONS) els.push(renderRetry(r, noop, noop), renderRetry(r, noop, noop, lintDetail));
@@ -389,6 +488,7 @@ describe('banned-word lint over all screens', () => {
       expect(findBannedWords(el.textContent ?? '')).toEqual([]);
       for (const n of [el, ...Array.from(el.querySelectorAll('*'))]) {
         for (const a of ['aria-label', 'title', 'alt']) expect(findBannedWords(n.getAttribute(a) ?? '')).toEqual([]);
+        if (n.tagName.toLowerCase() === 'title') expect(findBannedWords(n.textContent ?? '')).toEqual([]);
       }
     }
     // legend notes too
