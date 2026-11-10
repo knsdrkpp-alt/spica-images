@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   renderBarChart, renderPieChart, renderPolarChart, POLAR_START_DEG, RING_GEOMETRY,
 } from '../../src/ui/charts';
-import { COLORS_6, COLORS_12 } from '../../src/diagnosis/colors';
+import { COLORS_6, COLORS_12, lightenForDark } from '../../src/diagnosis/colors';
 import { findBannedWords } from '../../src/diagnosis/feedback';
 
 const six = { colors: COLORS_6 };
@@ -35,9 +35,18 @@ describe('renderBarChart', () => {
     expect(svg.getAttribute('role')).toBe('img');
     expect(svg.getAttribute('aria-label')).toContain('赤22');
   });
-  it('12 colours give 12 bars', () => {
+  it('12 colours give 12 wide bars labelled with one-character names at >= 16 units', () => {
     const svg = renderBarChart(new Array(12).fill(0).map((_, i) => i + 1), twelve);
-    expect(svg.querySelectorAll('rect.bar')).toHaveLength(12);
+    const rects = Array.from(svg.querySelectorAll('rect.bar'));
+    expect(rects).toHaveLength(12);
+    const names = Array.from(svg.querySelectorAll('.bar-name')).map((t) => t.textContent!);
+    expect(names).toEqual(COLORS_12.map((c) => c.shortName));
+    expect(names.every((x) => x.length === 1)).toBe(true);
+    for (const t of Array.from(svg.querySelectorAll('.bar-name, .bar-value'))) {
+      expect(Number(t.getAttribute('font-size'))).toBeGreaterThanOrEqual(16);
+    }
+    const span = Number(rects[11].getAttribute('x')) + Number(rects[11].getAttribute('width')) - Number(rects[0].getAttribute('x'));
+    expect(span).toBeGreaterThan(340);
   });
   it('all-zero input gives zero-height bars and no NaN', () => {
     const svg = renderBarChart(new Array(6).fill(0), six);
@@ -86,6 +95,11 @@ describe('renderPieChart', () => {
     expect(svg.querySelector('circle')).not.toBeNull();
     noNaN(svg);
     expect(renderPieChart(new Array(12).fill(8), twelve).querySelectorAll('path')).toHaveLength(12);
+  });
+  it('12 colours label only wedges of at least 4%', () => {
+    const svg = renderPieChart([3, 3, 4, 10, 10, 10, 10, 10, 10, 10, 10, 10], twelve);
+    expect(svg.querySelectorAll('path')).toHaveLength(12);
+    expect(svg.querySelectorAll('.pie-label')).toHaveLength(10);
   });
 });
 
@@ -145,18 +159,35 @@ describe('renderPolarChart', () => {
     const red = svg.querySelectorAll('g.ring-outer polyline')[0].getAttribute('points')!.split(' ');
     expect(angle(red[0])).toBeCloseTo(POLAR_START_DEG + 360 - 0.75 - 360, 0);
   });
-  it('keeps even a 3-digit number inside the viewBox', () => {
-    const t = Array.from(renderPolarChart(rings, [0, 0, 0, 100, 0, 0], six).querySelectorAll('text.share-number'))[3];
-    expect(Number(t.getAttribute('x')) + 0.3 * 26 * 3).toBeLessThan(400);
+  it('a lone 100 (in any sector) stays clear of the outer ring and of the viewBox edge', () => {
+    for (let k = 0; k < 6; k++) {
+      const shares = [0, 0, 0, 0, 0, 0];
+      shares[k] = 100;
+      const t = Array.from(renderPolarChart(rings, shares, six).querySelectorAll('text.share-number'))[k];
+      expect(t.textContent).toBe('100');
+      const size = Number(t.getAttribute('font-size'));
+      expect(size).toBeLessThan(26);
+      const x = Number(t.getAttribute('x'));
+      const y = Number(t.getAttribute('y'));
+      const half = 0.3 * size * 3;
+      const [x0, x1, y0, y1] = [x - half, x + half, y - 0.75 * size, y];
+      expect(x0).toBeGreaterThan(2); expect(x1).toBeLessThan(398);
+      expect(y0).toBeGreaterThan(2); expect(y1).toBeLessThan(398);
+      // nearest point of the glyph box to the centre is outside the ring's maximum radius
+      const nx = Math.min(Math.max(200, x0), x1);
+      const ny = Math.min(Math.max(200, y0), y1);
+      expect(Math.hypot(nx - 200, ny - 200), `sector ${k}`).toBeGreaterThan(RING_GEOMETRY.outer.rMax + 2);
+    }
   });
-  it('places the numbers outside each sector, inside the viewBox, in the colour\'s own colour', () => {
-    for (const [shares, opts, size] of [[SHARES6, six, 26], [new Array(12).fill(0).map((_, i) => 100 - i), twelve, 17]] as const) {
+  it('places bold numbers outside each sector, inside the viewBox, in a lightened tint of the colour', () => {
+    for (const [shares, opts, size] of [[SHARES6, six, 26], [new Array(12).fill(0).map((_, i) => 20 - i), twelve, 18]] as const) {
       const svg = renderPolarChart(rings, shares as number[], opts);
       const texts = Array.from(svg.querySelectorAll('text.share-number'));
       expect(texts).toHaveLength(opts.colors.length);
       texts.forEach((t, k) => {
         expect(t.textContent).toBe(String(shares[k]));
-        expect(t.getAttribute('fill')).toBe(opts.colors[k].css);
+        expect(t.getAttribute('fill')).toBe(lightenForDark(opts.colors[k].css));
+        expect(t.getAttribute('font-weight')).toBe('700');
         expect(Number(t.getAttribute('font-size'))).toBe(size);
         const x = Number(t.getAttribute('x'));
         const y = Number(t.getAttribute('y'));
@@ -181,10 +212,26 @@ describe('renderPolarChart', () => {
     const stars = (el: SVGSVGElement) => el.querySelector('g.stars')!.innerHTML;
     expect(stars(a)).toBe(stars(renderPolarChart(rings, [0, 0, 0, 0, 0, 0], six)));
   });
-  it('a silent curve sits on the base circle without NaN', () => {
+  it('with no usable curve it draws the guides and a short centred text instead of rings', () => {
     const svg = renderPolarChart([{ id: 'outer', label: 'x', curveDb: new Array(240).fill(-120) }], new Array(6).fill(0), six);
-    const rs = Array.from(svg.querySelectorAll('polyline')).flatMap((l) => l.getAttribute('points')!.split(' ')).map(radius);
-    for (const r of rs) expect(r).toBeCloseTo(RING_GEOMETRY.outer.rBase, 0);
+    expect(svg.querySelectorAll('polyline')).toHaveLength(0);
+    expect(svg.querySelectorAll('circle.guide').length).toBeGreaterThan(0);
+    expect(svg.querySelector('text.polar-empty')!.textContent).toBe('リングは表示できません');
+    expect(findBannedWords(svg.textContent!)).toEqual([]);
     noNaN(svg);
+    // no rings requested (both unchecked): no text either
+    expect(renderPolarChart([], SHARES6, six).querySelector('text.polar-empty')).toBeNull();
   });
+  it('sector polylines share their boundary point (no gap) and dark colours get thicker lines', () => {
+    const svg = renderPolarChart([rings[0]], new Array(12).fill(8), twelve);
+    const lines = Array.from(svg.querySelectorAll('g.ring-outer polyline'));
+    for (let k = 0; k < 11; k++) {
+      const a = lines[k].getAttribute('points')!.split(' ');
+      expect(a[a.length - 1]).toBe(lines[k + 1].getAttribute('points')!.split(' ')[0]);
+    }
+    const width = (k: number) => Number(lines[k].getAttribute('stroke-width'));
+    expect(width(9)).toBeGreaterThan(width(3)); // 藍 vs 黄
+    expect(lines[9].classList.contains('ring-line-dim')).toBe(true);
+  });
+;
 });

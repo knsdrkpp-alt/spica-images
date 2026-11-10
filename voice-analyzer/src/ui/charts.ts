@@ -1,3 +1,4 @@
+import { DARK_CARD_BG, contrastRatio, lightenForDark } from '../diagnosis/colors';
 import { SPECTRUM_FLOOR_DB } from '../dsp/spectrum';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -14,6 +15,8 @@ export function svgEl<K extends keyof SVGElementTagNameMap>(
 export interface ChartColor {
   name: string;
   css: string;
+  /** One-character form for tight labels; falls back to name. */
+  shortName?: string;
 }
 
 export interface ChartOptions {
@@ -54,8 +57,9 @@ export function renderBarChart(values: number[], opts: ChartOptions): SVGSVGElem
   });
   svg.appendChild(svgEl('title', {}, '色ごとの割合(棒グラフ)'));
   const slot = (BAR.right - BAR.left) / n;
-  const bw = slot * (n > 6 ? 0.7 : 0.62);
+  const bw = slot * (n > 6 ? 0.8 : 0.62);
   const big = n <= 6;
+  // Rendered at about 0.75 px per unit on a 360 px screen: 16 units is about 12 px.
   svg.appendChild(svgEl('line', {
     x1: BAR.left, x2: BAR.right, y1: BAR.base, y2: BAR.base, class: 'axis',
   }));
@@ -70,12 +74,12 @@ export function renderBarChart(values: number[], opts: ChartOptions): SVGSVGElem
     svg.appendChild(rect);
     svg.appendChild(svgEl('text', {
       x: fmt(cx), y: fmt(BAR.base - h - 6), 'text-anchor': 'middle', class: 'bar-value',
-      'font-size': big ? 15 : 12,
+      'font-size': big ? 17 : 16,
     }, String(Math.round(v))));
     svg.appendChild(svgEl('text', {
-      x: fmt(cx), y: BAR.base + 20, 'text-anchor': 'middle', class: 'bar-name',
-      'font-size': big ? 14 : 10,
-    }, colors[i].name));
+      x: fmt(cx), y: BAR.base + 22, 'text-anchor': 'middle', class: 'bar-name',
+      'font-size': 16,
+    }, big ? colors[i].name : (colors[i].shortName ?? colors[i].name)));
   });
   return svg;
 }
@@ -122,11 +126,11 @@ export function renderPieChart(values: number[], opts: ChartOptions): SVGSVGElem
     const path = svgEl('path', { d, fill: colors[i].css, class: 'wedge' });
     path.appendChild(svgEl('title', {}, `${colors[i].name} ${pctText(frac)}`));
     svg.appendChild(path);
-    if (frac >= 0.03) {
+    if (frac >= (n <= 6 ? 0.03 : 0.04)) {
       const [lx, ly] = frac >= 0.9999 ? [c, c] : pt((start + end) / 2, r * 0.66);
       labels.push(svgEl('text', {
         x: lx.toFixed(3), y: (ly + 5).toFixed(3), 'text-anchor': 'middle', class: 'pie-label',
-        'font-size': n <= 6 ? 15 : 12,
+        'font-size': n <= 6 ? 15 : 13,
       }, `${Math.round(frac * 100)}%`));
     }
     start = end;
@@ -210,16 +214,21 @@ export function renderPolarChart(
   }
   svg.appendChild(guides);
 
-  for (const ring of rings) {
+  const audible = (ring: PolarRing) => ring.curveDb.some((v) => Number.isFinite(v) && v > SPECTRUM_FLOOR_DB);
+  if (rings.length > 0 && !rings.some(audible)) {
+    svg.appendChild(svgEl('text', {
+      x: c, y: c + 5, 'text-anchor': 'middle', class: 'polar-empty', 'font-size': 14,
+    }, 'リングは表示できません'));
+  }
+  for (const ring of rings.filter(audible)) {
     const geo = RING_GEOMETRY[ring.id] ?? RING_GEOMETRY.outer;
     const pts = ring.curveDb.length;
     const vals = Array.from({ length: pts }, (_, i) =>
       (Number.isFinite(ring.curveDb[i]) ? ring.curveDb[i] : SPECTRUM_FLOOR_DB));
     const peak = Math.max(SPECTRUM_FLOOR_DB, ...vals);
-    const silent = !(peak > SPECTRUM_FLOOR_DB);
     // Point i (LOW to HIGH) sits (pts - 1 - i + 0.5) / pts of a turn clockwise from the start.
     const xy = (i: number): string => {
-      const level = silent ? 0 : Math.min(1, Math.max(0, (vals[i] - (peak - 60)) / 60));
+      const level = Math.min(1, Math.max(0, (vals[i] - (peak - 60)) / 60));
       const r = geo.rBase + (geo.rMax - geo.rBase) * level;
       const a = rad(POLAR_START_DEG + (360 * (pts - 1 - i + 0.5)) / pts);
       return `${(c + r * Math.cos(a)).toFixed(1)},${(c + r * Math.sin(a)).toFixed(1)}`;
@@ -232,22 +241,31 @@ export function renderPolarChart(
       const to = Math.min(pts - 1, Math.round((k + 1) * per)); // include the next sector's first point
       const line: string[] = [];
       for (let i = from; i <= to; i++) line.push(xy(i));
+      // Sectors in the darkest colours (under 3:1 on the card) get a thicker line and a faint glow.
+      const dim = DARK_CARD_BG.some((bg) => contrastRatio(colors[k].css, bg) < 3);
       g.appendChild(svgEl('polyline', {
-        points: line.join(' '), fill: 'none', stroke: colors[k].css, 'stroke-width': geo.width,
-        'stroke-linejoin': 'round', class: 'ring-line',
+        points: line.join(' '), fill: 'none', stroke: colors[k].css,
+        'stroke-width': dim ? geo.width + 0.6 : geo.width,
+        'stroke-linejoin': 'round', class: dim ? 'ring-line ring-line-dim' : 'ring-line',
       }));
     }
     svg.appendChild(g);
   }
 
   const numbers = svgEl('g', { class: 'shares' });
-  const size = n <= 6 ? 26 : 17;
+  const baseSize = n <= 6 ? 26 : 18;
   for (let k = 0; k < n; k++) {
     const a = rad(POLAR_START_DEG + (360 * (n - 1 - k + 0.5)) / n);
+    const text = String(Math.round(s[k]));
+    // A 3-digit value (a lone 100) is smaller and slightly further out, clear of the ring and the edge.
+    const wide = text.length >= 3;
+    const size = wide ? Math.round(baseSize * 0.65) : baseSize;
+    const r = wide ? POLAR.numberR + 4 : POLAR.numberR;
     numbers.appendChild(svgEl('text', {
-      x: fmt(c + POLAR.numberR * Math.cos(a)), y: fmt(c + POLAR.numberR * Math.sin(a) + size * 0.35),
-      'text-anchor': 'middle', 'font-size': size, fill: colors[k].css, class: 'share-number',
-    }, String(Math.round(s[k]))));
+      x: fmt(c + r * Math.cos(a)), y: fmt(c + r * Math.sin(a) + size * 0.35),
+      'text-anchor': 'middle', 'font-size': size, 'font-weight': 700,
+      fill: lightenForDark(colors[k].css), class: 'share-number',
+    }, text));
   }
   svg.appendChild(numbers);
   return svg;

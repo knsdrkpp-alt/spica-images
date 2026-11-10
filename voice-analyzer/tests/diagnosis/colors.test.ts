@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  COLORS_6, COLORS_12, colorLevels, colorShares, meanCurveDb, rankColors,
+  COLORS_6, COLORS_12, lightenForDark, colorLevels, colorShares, meanCurveDb, rankColors,
 } from '../../src/diagnosis/colors';
 import { BAND_COLORS, BAND_EDGES_HZ } from '../../src/diagnosis/config';
 
@@ -88,5 +88,42 @@ describe('meanCurveDb', () => {
   it('empty input gives the floor', () => {
     expect(meanCurveDb([])).toEqual(new Array(240).fill(-120));
     expect(meanCurveDb([undefined])).toEqual(new Array(240).fill(-120));
+  });
+});
+
+/** Independent WCAG 2 contrast ratio. */
+function wcag(a: string, b: string): number {
+  const lum = (hex: string) => {
+    const [r, g, bl] = [1, 3, 5].map((o) => parseInt(hex.slice(o, o + 2), 16) / 255)
+      .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+
+describe('lightenForDark', () => {
+  it('gives every 6- and 12-colour text tint at least 4.5:1 on the dark card colours', () => {
+    for (const c of [...COLORS_6, ...COLORS_12]) {
+      const tint = lightenForDark(c.css);
+      expect(tint).toMatch(/^#[0-9a-f]{6}$/);
+      for (const bg of ['#07122e', '#0f2a5e', '#030816']) {
+        expect(wcag(tint, bg), `${c.name} ${tint} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+  it('keeps the hue: an already light colour is unchanged and a dark one is only mixed toward white', () => {
+    expect(lightenForDark('#f2d21b')).toBe('#f2d21b');
+    const t = lightenForDark('#3949ab');
+    expect(t).not.toBe('#ffffff');
+    const ch = (h: string) => [1, 3, 5].map((o) => parseInt(h.slice(o, o + 2), 16));
+    ch(t).forEach((v, i) => expect(v).toBeGreaterThanOrEqual(ch('#3949ab')[i]));
+    expect(ch(t)[2]).toBeGreaterThan(ch(t)[0]); // still bluish
+  });
+  it('short names are one character and unique', () => {
+    for (const set of [COLORS_6, COLORS_12]) {
+      expect(set.every((c) => c.shortName.length === 1)).toBe(true);
+      expect(new Set(set.map((c) => c.shortName)).size).toBe(set.length);
+    }
   });
 });

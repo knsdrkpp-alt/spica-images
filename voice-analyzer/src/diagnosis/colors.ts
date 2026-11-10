@@ -3,6 +3,8 @@ import { BAND_COLORS, BAND_EDGES_HZ } from './config';
 
 export interface ColorBand {
   name: string;
+  /** One-character form for tight labels (12-colour bar chart). */
+  shortName: string;
   css: string;
   lowHz: number;
   highHz: number;
@@ -10,19 +12,21 @@ export interface ColorBand {
 
 /** Six colours, LOW to HIGH frequency: the 12 analysis bands merged pairwise. */
 export const COLORS_6: ColorBand[] = [
-  { name: '赤', css: '#e0242a', lowHz: 100, highHz: 208 },
-  { name: '橙', css: '#f28c1b', lowHz: 208, highHz: 431 },
-  { name: '黄', css: '#f2d21b', lowHz: 431, highHz: 895 },
-  { name: '緑', css: '#2fc24a', lowHz: 895, highHz: 1859 },
-  { name: '青', css: '#3f6fe0', lowHz: 1859, highHz: 3860 },
-  { name: '紫', css: '#a53fd6', lowHz: 3860, highHz: 8000 },
+  { name: '赤', shortName: '赤', css: '#e0242a', lowHz: 100, highHz: 208 },
+  { name: '橙', shortName: '橙', css: '#f28c1b', lowHz: 208, highHz: 431 },
+  { name: '黄', shortName: '黄', css: '#f2d21b', lowHz: 431, highHz: 895 },
+  { name: '緑', shortName: '緑', css: '#2fc24a', lowHz: 895, highHz: 1859 },
+  { name: '青', shortName: '青', css: '#3f6fe0', lowHz: 1859, highHz: 3860 },
+  { name: '紫', shortName: '紫', css: '#a53fd6', lowHz: 3860, highHz: 8000 },
 ];
 
 const NAMES_12 = ['赤', '朱', '橙', '黄', '黄緑', '若草', '緑', '水色', '青', '藍', '青紫', '紫'];
+/** 萌 = 萌黄 (yellow-green), 若 = 若草, 水 = 水色, 菫 = 菫色 (blue-violet). */
+const SHORT_12 = ['赤', '朱', '橙', '黄', '萌', '若', '緑', '水', '青', '藍', '菫', '紫'];
 
 /** Twelve colours, LOW to HIGH: the existing BAND_COLORS / BAND_EDGES_HZ. */
 export const COLORS_12: ColorBand[] = BAND_COLORS.map((css, i) => ({
-  name: NAMES_12[i], css, lowHz: BAND_EDGES_HZ[i], highHz: BAND_EDGES_HZ[i + 1],
+  name: NAMES_12[i], shortName: SHORT_12[i], css, lowHz: BAND_EDGES_HZ[i], highHz: BAND_EDGES_HZ[i + 1],
 }));
 
 export const colorsFor = (bands: 6 | 12): ColorBand[] => (bands === 6 ? COLORS_6 : COLORS_12);
@@ -82,4 +86,42 @@ export function meanCurveDb(curves: Array<number[] | undefined | null>): number[
     for (const c of have) s += Number.isFinite(c[i]) ? c[i] : SPECTRUM_FLOOR_DB;
     return s / have.length;
   });
+}
+
+/** Darkest (edge) and lightest (centre) colours of the dark graph cards. */
+export const DARK_CARD_BG = ['#07122e', '#0f2a5e'];
+
+function rgb(css: string): [number, number, number] {
+  const h = css.replace('#', '');
+  return [0, 2, 4].map((o) => parseInt(h.slice(o, o + 2), 16)) as [number, number, number];
+}
+
+/** WCAG 2 relative luminance of a #rrggbb colour. */
+export function luminance(css: string): number {
+  const [r, g, b] = rgb(css).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG 2 contrast ratio of two #rrggbb colours. */
+export function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+const TEXT_CONTRAST = 4.6; // 4.5:1 plus a small margin
+
+/**
+ * A tint of the colour for TEXT on the dark cards: mixed toward white just enough to reach 4.5:1
+ * against every card background colour. Colours that already pass are returned unchanged.
+ */
+export function lightenForDark(css: string): string {
+  const base = rgb(css);
+  for (let t = 0; t <= 1.0001; t += 0.02) {
+    const hex = '#' + base.map((v) => Math.round(v + (255 - v) * Math.min(1, t)).toString(16).padStart(2, '0')).join('');
+    if (DARK_CARD_BG.every((bg) => contrastRatio(hex, bg) >= TEXT_CONTRAST)) return hex;
+  }
+  return '#ffffff';
 }
