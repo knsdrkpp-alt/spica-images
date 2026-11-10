@@ -112,3 +112,24 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
 
 .notice-screen h1 { color: var(--fg); }
 .remaining { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.birth { margin: 20px 0 0; }
+.birth label { display: block; font-weight: 600; }
+.birth input[type="date"] {
+  display: block; width: 100%; min-height: 44px; margin: 6px 0 0; padding: 6px 10px;
+  font: inherit; color: var(--fg); background: var(--bg); border: 1px solid #888888; border-radius: 8px;
+}
+
+/* 「声と数のあいだ」: a quiet, neutral card (no accent colour, no warning look). */
+.reading-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px 16px; margin: 24px 0 8px; }
+.reading-card h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reading-card h4 { font-family: var(--serif); font-size: 1rem; margin: 18px 0 4px; }
+.reading-card .tag { font-family: var(--sans); font-size: 0.75rem; font-weight: 600; color: var(--muted); border: 1px solid var(--muted); border-radius: 999px; padding: 0 8px; }
+.reading-disclaimer { color: var(--fg); font-size: 0.875rem; }
+.reading-number { display: flex; align-items: baseline; gap: 12px; margin: 12px 0 4px; }
+.reading-num { font-family: var(--serif); font-size: 3rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.reading-num-title { font-family: var(--serif); font-size: 1.125rem; font-weight: 600; }
+.reading-color { margin: 8px 0 12px; padding-left: 12px; border-left: 3px solid var(--border); }
+.reading-color-head { font-weight: 600; margin-bottom: 0; }
+.reading-card ol { padding-left: 1.4em; margin: 4px 0 0; }
+.reading-card li { margin: 6px 0; }

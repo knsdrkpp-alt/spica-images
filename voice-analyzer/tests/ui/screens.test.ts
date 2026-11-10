@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import {
-  renderStart, renderRecording, renderResult, renderMicError, renderRetry,
+  renderStart, renderRecording, renderResult, renderMicError, renderRetry, renderReading,
 } from '../../src/ui/screens';
+import { buildReading } from '../../src/numerology/reading';
 import { BAND_NOTES, COLOR6_NOTES } from '../../src/ui/band-notes';
 import { findBannedWords, type Feedback } from '../../src/diagnosis/feedback';
 import {
@@ -307,12 +308,12 @@ describe('renderStart', () => {
     // The button disables itself after one click, so each choice gets a fresh screen.
     const onStart = vi.fn();
     buttonByText(renderStart(onStart), '声を録音する')!.click();
-    expect(onStart).toHaveBeenLastCalledWith('unspecified');
+    expect(onStart).toHaveBeenLastCalledWith('unspecified', null);
     for (const sex of ['female', 'male'] as const) {
       const el = renderStart(onStart);
       el.querySelector<HTMLInputElement>(`input[type=radio][value=${sex}]`)!.click();
       buttonByText(el, '声を録音する')!.click();
-      expect(onStart).toHaveBeenLastCalledWith(sex);
+      expect(onStart).toHaveBeenLastCalledWith(sex, null);
     }
   });
   it('disables 声を録音する after the first click (no parallel mic opens)', () => {
@@ -328,6 +329,85 @@ describe('renderStart', () => {
     expect(el.querySelector('h1')!.textContent).toBe('声のタイプチェック');
     for (const t of ['このチェックでわかること', '音声は端末の外に送りません', '吃音', '15〜30 cm', '16歳未満']) {
       expect(el.textContent).toContain(t);
+    }
+  });
+});
+
+describe('renderStart birth date', () => {
+  const dateInput = (el: HTMLElement) => el.querySelector<HTMLInputElement>('input[type=date]')!;
+  it('has an optional, labelled date field and the privacy lines', () => {
+    const el = renderStart(noop);
+    const input = dateInput(el);
+    expect(input).not.toBeNull();
+    expect(input.required).toBe(false);
+    expect(input.min).toBe('1900-01-01');
+    expect(input.max).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const label = el.querySelector<HTMLLabelElement>(`label[for="${input.id}"]`)!;
+    expect(label.textContent).toBe('生年月日(入力は任意)');
+    expect(el.textContent).toContain('入力した日付は、端末の外に送らず、保存もしません。入力しなくても使えます。');
+    expect(el.textContent).toContain('音声は端末の外に送りません');
+  });
+  it('passes a BirthDate when filled and null when empty or invalid', () => {
+    const run = (value: string) => {
+      const onStart = vi.fn();
+      const el = renderStart(onStart);
+      dateInput(el).value = value;
+      buttonByText(el, '声を録音する')!.click();
+      return onStart.mock.calls[0][1];
+    };
+    expect(run('1990-05-12')).toEqual({ year: 1990, month: 5, day: 12 });
+    expect(run('')).toBeNull();
+    expect(run('2023-02-29')).toBeNull();
+    expect(run('1850-01-01')).toBeNull();
+    expect(run('2999-01-01')).toBeNull();
+  });
+});
+
+describe('renderReading and the result card', () => {
+  const reading = buildReading(9, [10, 30, 5, 20, 25, 10]);
+  it('has the card structure: title, tag, disclaimer right under the title, number, sections, 3 questions', () => {
+    const el = renderReading(reading);
+    expect(el.getAttribute('role')).toBe('region');
+    expect(el.getAttribute('aria-label')).toContain('声と数のあいだ');
+    expect(el.querySelector('h3')!.textContent).toBe('声と数のあいだ読み物');
+    expect(el.querySelector('.tag')!.textContent).toBe('読み物');
+    expect(el.querySelector('h3')!.nextElementSibling!.textContent).toBe(
+      '娯楽・自己理解のための読み物です。科学的な根拠は確認されていません。');
+    expect(el.querySelector('.reading-num')!.textContent).toBe('9');
+    expect(el.textContent).toContain(reading.numberTitle);
+    expect(el.textContent).toContain(reading.numberText);
+    expect(el.textContent).toContain('声に出ていたこと');
+    expect(el.textContent).toContain('いちばん強かった帯:橙(約30%)');
+    expect(el.textContent).toContain('弱めに出ていた帯:黄(約5%)');
+    expect(el.textContent).toContain(reading.strongest.text);
+    expect(el.textContent).toContain(reading.weakest.text);
+    expect(el.textContent).toContain('ふりかえりの問い');
+    expect([...el.querySelectorAll('ol > li')].map((l) => l.textContent)).toEqual(reading.questions);
+  });
+  it('writes text only (no markup is created from text)', () => {
+    const el = renderReading({ ...reading, numberText: '<b>x</b><img src=x>' });
+    expect(el.querySelector('b, img')).toBeNull();
+    expect(el.textContent).toContain('<b>x</b>');
+  });
+  it('sits after STOP_NOTICE and before the buttons; footer stays last and single', () => {
+    const el = result({ reading });
+    expect(el.querySelectorAll('.reading-card')).toHaveLength(1);
+    const kids = [...el.children];
+    const iCard = kids.findIndex((k) => k.classList.contains('reading-card'));
+    const iStop = kids.findIndex((k) => k.textContent === STOP_NOTICE);
+    const iBtn = kids.findIndex((k) => k.tagName === 'BUTTON');
+    expect(iStop).toBeGreaterThan(-1);
+    expect(iCard).toBe(iStop + 1);
+    expect(iCard).toBeLessThan(iBtn);
+    expect(el.lastElementChild!.tagName).toBe('FOOTER');
+    expect(count(el.textContent!, FIXED_FOOTER)).toBe(1);
+    expect(count(el.textContent!, STOP_NOTICE)).toBe(1);
+  });
+  it('renders nothing (no placeholder) without a reading', () => {
+    for (const o of [{}, { reading: null }]) {
+      const el = result(o);
+      expect(el.querySelector('.reading-card')).toBeNull();
+      expect(el.textContent).not.toContain('声と数のあいだ');
     }
   });
 });
@@ -456,7 +536,9 @@ describe('renderRecording', () => {
 
 describe('banned-word lint over all screens', () => {
   it('finds none', () => {
-    const els: HTMLElement[] = [renderStart(noop)];
+    const els: HTMLElement[] = [renderStart(noop), renderReading(buildReading(33, [10, 30, 5, 20, 25, 10]))];
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 22] as const) els.push(renderReading(buildReading(n, [0, 0, 5, 15, 30, 50])));
+    els.push(result({ reading: buildReading(11, [20, 20, 20, 20, 10, 10]) }));
     for (const ph of ['vowel', 'sentence', 'rest', 'analyzing'] as const) {
       for (const ready of [false, true]) {
         const r = renderRecording(noop);

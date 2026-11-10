@@ -1,6 +1,6 @@
 import type { MicError, Recorder } from './audio/capture';
 import { classify, medianProfile } from './diagnosis/classify';
-import { meanCurveDb } from './diagnosis/colors';
+import { colorShares, meanCurveDb } from './diagnosis/colors';
 import { buildFeedback } from './diagnosis/feedback';
 import { checkGate, type GateDetail } from './diagnosis/gate';
 import type { GateReason, GateWarning } from './diagnosis/gate';
@@ -9,6 +9,8 @@ import { toProfile } from './diagnosis/profile';
 import type { Norms } from './diagnosis/profile';
 import { extractSentence, extractVowel } from './dsp/features';
 import { hzToNoteName } from './dsp/note';
+import { lifePathNumber, type BirthDate, type LifePath } from './numerology/life-path';
+import { readingOrNull } from './numerology/reading';
 import type { SetFeatures, Sex } from './types';
 import {
   renderMicError, renderRecording, renderResult, renderRetry, renderStart,
@@ -66,6 +68,9 @@ export class App {
   /** Gate warnings of each accepted set (parallel to `sets`). */
   private warnings: GateWarning[][] = [];
   private sex: Sex = 'unspecified';
+  /** Optional birth date: kept in memory for this run only (never stored, never sent). */
+  private birth: BirthDate | null = null;
+  private life: LifePath | null = null;
   /** Bumped whenever a set is started, abandoned, or the app returns to start. */
   private token = 0;
 
@@ -81,7 +86,9 @@ export class App {
     this.releaseRecorder();
     this.sets = [];
     this.warnings = [];
-    this.show(renderStart((sex) => this.begin(sex)));
+    this.birth = null;
+    this.life = null;
+    this.show(renderStart((sex, birth) => this.begin(sex, birth)));
   }
 
   private readonly home = () => this.start();
@@ -106,8 +113,10 @@ export class App {
     this.show(renderRetry('interrupted', () => this.openAndRun(), this.home));
   }
 
-  private begin(sex: Sex): void {
+  private begin(sex: Sex, birth: BirthDate | null): void {
     this.sex = sex;
+    this.birth = birth;
+    this.life = birth ? lifePathNumber(birth) : null;
     this.openAndRun();
   }
 
@@ -253,12 +262,15 @@ export class App {
       sentenceDb: meanCurveDb(sets.map((s) => s.sentence.spectrumDb)),
       vowelDb: meanCurveDb(sets.map((s) => s.vowel.spectrumDb)),
     };
+    // Same averaged sentence curve as the polar chart; null without a birth date.
+    const reading = readingOrNull(this.life, colorShares(curves.sentenceDb, 6));
     this.show(renderResult(f, curves, {
       provisionalNorms: deps.norms.provisional,
       canRecordMore: sets.length < MAX_SETS,
       onAgain: () => this.openAndRun(),
       onHome: this.home,
       notices,
+      reading,
       measures: {
         f0Hz,
         f0Note: f0Hz === null ? null : hzToNoteName(f0Hz),

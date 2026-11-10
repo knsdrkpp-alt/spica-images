@@ -5,6 +5,8 @@ import type { Feedback } from '../diagnosis/feedback';
 import type { GateDetail, GateReason } from '../diagnosis/gate';
 import type { MicError } from '../audio/capture';
 import type { Sex } from '../types';
+import { parseBirthDate, type BirthDate } from '../numerology/life-path';
+import type { Reading } from '../numerology/reading';
 import { BAND_NOTES, COLOR6_NOTES } from './band-notes';
 import {
   renderBarChart, renderPieChart, renderPolarChart, svgEl, type PolarRing,
@@ -47,7 +49,13 @@ function list(items: string[]): HTMLUListElement {
   return h('ul', {}, ...items.map((t) => h('li', {}, t)));
 }
 
-export function renderStart(onStart: (sex: Sex) => void): HTMLElement {
+function todayIso(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function renderStart(onStart: (sex: Sex, birth: BirthDate | null) => void): HTMLElement {
   const sexOptions: [Sex, string][] = [['unspecified', '答えない'], ['female', '女性'], ['male', '男性']];
   const radios = sexOptions.map(([value, label]) => {
     const input = h('input', { type: 'radio', name: 'sex', value });
@@ -56,6 +64,9 @@ export function renderStart(onStart: (sex: Sex) => void): HTMLElement {
   });
   const selected = (): Sex =>
     (radios.find((r) => r.input.checked)?.input.value as Sex | undefined) ?? 'unspecified';
+
+  const birthInput = h('input', { type: 'date', id: 'birth-date', name: 'birth', min: '1900-01-01', max: todayIso() });
+  const birth = (): BirthDate | null => parseBirthDate(birthInput.value);
 
   return h('section', { class: 'screen start' },
     h('h1', {}, '声のタイプチェック'),
@@ -85,7 +96,12 @@ export function renderStart(onStart: (sex: Sex) => void): HTMLElement {
       ...radios.map((r) => r.node),
       h('p', { class: 'note' }, '選んだ内容は、声の高さなどを比べる参考グループを決めるためだけに使います。'),
     ),
-    micButton('声を録音する', () => onStart(selected())),
+    h('div', { class: 'birth' },
+      h('label', { for: 'birth-date' }, '生年月日(入力は任意)'),
+      birthInput,
+      h('p', { class: 'note' }, '入力した日付は、端末の外に送らず、保存もしません。入力しなくても使えます。'),
+    ),
+    micButton('声を録音する', () => onStart(selected(), birth())),
   );
 }
 
@@ -209,6 +225,34 @@ export interface ResultOptions {
   /** Neutral notices (processing on, borderline noise), one element each. */
   notices: string[];
   measures: Measures;
+  /** 「声と数のあいだ」: shown only when a birth date was given and the spectrum was usable. */
+  reading?: Reading | null;
+}
+
+function renderColorReading(label: string, c: Reading['strongest']): HTMLElement {
+  return h('div', { class: 'reading-color' },
+    h('p', { class: 'reading-color-head' }, `${label}:${c.name}(約${c.share}%)`),
+    h('p', {}, h('strong', {}, c.title)),
+    h('p', {}, c.text),
+  );
+}
+
+/** The optional 「声と数のあいだ」 card. Text only (textContent), neutral styling. */
+export function renderReading(r: Reading): HTMLElement {
+  return h('section', { class: 'reading-card', role: 'region', 'aria-label': '声と数のあいだ(読み物)' },
+    h('h3', {}, '声と数のあいだ', h('span', { class: 'tag' }, '読み物')),
+    h('p', { class: 'reading-disclaimer' }, r.disclaimer),
+    h('div', { class: 'reading-number' },
+      h('span', { class: 'reading-num' }, String(r.life)),
+      h('span', { class: 'reading-num-title' }, r.numberTitle),
+    ),
+    h('p', {}, r.numberText),
+    h('h4', {}, '声に出ていたこと'),
+    renderColorReading('いちばん強かった帯', r.strongest),
+    renderColorReading('弱めに出ていた帯', r.weakest),
+    h('h4', {}, 'ふりかえりの問い'),
+    h('ol', {}, ...r.questions.map((q) => h('li', {}, q))),
+  );
 }
 
 function renderMeasures(m: Measures): HTMLElement | null {
@@ -366,6 +410,7 @@ export function renderResult(f: Feedback, curves: ResultCurves, opts: ResultOpti
     ));
   }
   root.append(h('p', { class: 'notice' }, STOP_NOTICE));
+  if (opts.reading) root.append(renderReading(opts.reading));
   if (opts.canRecordMore) root.append(micButton('もう1セット録音する', opts.onAgain));
   root.append(button(HOME_LABEL, opts.onHome));
   root.append(h('footer', { class: 'footer' }, FIXED_FOOTER));

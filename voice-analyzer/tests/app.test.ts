@@ -7,6 +7,8 @@ import { harmonicTone, silence } from './helpers/synth';
 import { extractSentence } from '../src/dsp/features';
 import { colorShares, meanCurveDb } from '../src/diagnosis/colors';
 import { BAND_EDGES_HZ } from '../src/diagnosis/config';
+import { FIXED_FOOTER, STOP_NOTICE } from '../src/diagnosis/copy';
+import { readingOrNull } from '../src/numerology/reading';
 
 // Pass-through spy: records what the screen showed when the (synchronous, slow) analysis started.
 const probe = vi.hoisted(() => ({ textAtExtractSentence: [] as string[] }));
@@ -498,5 +500,87 @@ describe('App', () => {
     expect(bars).toEqual(expected);
     expect(bars.reduce((x, y) => x + y, 0)).toBe(100);
     expect(root.querySelectorAll('svg.chart-polar g.ring')).toHaveLength(2);
+  });
+
+  describe('声と数のあいだ (optional birth date)', () => {
+    const setBirth = (root: HTMLElement, v: string) => {
+      (root.querySelector('input[type=date]') as HTMLInputElement).value = v;
+    };
+    const count = (s: string, sub: string) => s.split(sub).length - 1;
+
+    it('with a birth date the result has the card with the right number, footer last and once, STOP_NOTICE once', async () => {
+      const rec = fakeRecorder(fullSet());
+      const { root } = setup(rec);
+      setBirth(root, '1990-05-12');
+      click(root, '声を録音する');
+      await flush();
+      const card = root.querySelector('.reading-card')!;
+      expect(card).not.toBeNull();
+      expect(card.querySelector('.reading-num')!.textContent).toBe('9');
+      expect(card.textContent).toContain('娯楽・自己理解のための読み物です');
+      // the colour parts come from the same averaged sentence curve as the polar chart
+      const curve = meanCurveDb([extractSentence(goodSentence().samples, SR).spectrumDb]);
+      const expected = readingOrNull(9, colorShares(curve, 6))!;
+      expect(card.textContent).toContain(`いちばん強かった帯:${expected.strongest.name}(約${expected.strongest.share}%)`);
+      const article = root.querySelector('article')!;
+      expect(count(article.textContent!, FIXED_FOOTER)).toBe(1);
+      expect(count(article.textContent!, STOP_NOTICE)).toBe(1);
+      expect(article.lastElementChild!.tagName).toBe('FOOTER');
+    });
+
+    it('without a birth date there is no card; 最初にもどる clears it and a new run without a date has none', async () => {
+      const rec = fakeRecorder([...fullSet(), ...fullSet()]);
+      const { root } = setup(rec);
+      setBirth(root, '1992-11-06');
+      click(root, '声を録音する');
+      await flush();
+      expect(root.querySelector('.reading-card .reading-num')!.textContent).toBe('11');
+      click(root, '最初にもどる');
+      expect((root.querySelector('input[type=date]') as HTMLInputElement).value).toBe('');
+      click(root, '声を録音する');
+      await flush();
+      expect(headline(root)).toContain('参考');
+      expect(root.querySelector('.reading-card')).toBeNull();
+      expect(root.textContent).not.toContain('声と数のあいだ');
+    });
+
+    it('an invalid date is ignored (no card)', async () => {
+      const rec = fakeRecorder(fullSet());
+      const { root } = setup(rec);
+      setBirth(root, '2023-02-29');
+      click(root, '声を録音する');
+      await flush();
+      expect(root.querySelector('.reading-card')).toBeNull();
+    });
+
+    it('the card stays after もう1セット (computed from the averaged curve)', async () => {
+      const rec = fakeRecorder([...fullSet(), ...fullSet()]);
+      const { root } = setup(rec);
+      setBirth(root, '1985-10-02');
+      click(root, '声を録音する');
+      await flush();
+      click(root, 'もう1セット');
+      await flush();
+      expect(root.querySelector('.reading-card .reading-num')!.textContent).toBe('8');
+    });
+
+    it('never writes to Storage, cookies or console during a full flow with a birth date', async () => {
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+      const cookie = vi.spyOn(document, 'cookie', 'set');
+      const log = [vi.spyOn(console, 'log'), vi.spyOn(console, 'info'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error')];
+      const rec = fakeRecorder([...fullSet(), ...fullSet()]);
+      const { root } = setup(rec);
+      setBirth(root, '1990-05-12');
+      click(root, '声を録音する');
+      await flush();
+      click(root, 'もう1セット');
+      await flush();
+      click(root, '最初にもどる');
+      expect(setItem).not.toHaveBeenCalled();
+      expect(cookie).not.toHaveBeenCalled();
+      for (const l of log) expect(l).not.toHaveBeenCalled();
+      expect(window.location.href).not.toContain('1990');
+      expect(window.location.search + window.location.hash).toBe('');
+    });
   });
 });
