@@ -65,7 +65,8 @@ fieldset.sex { border: 1px solid var(--border); border-radius: 8px; margin: 20px
 .chart-polar .stars circle { fill: #ffffff; }
 .chart-polar .guide { fill: none; stroke: rgba(255, 255, 255, 0.16); stroke-width: 1; }
 .chart-polar .divider { stroke: rgba(255, 255, 255, 0.3); stroke-width: 1; }
-.chart-polar .share-number { font-family: var(--serif); }
+/* A faint light halo keeps the darker colours (藍, 青紫) legible on the navy card. */
+.chart-polar .share-number { font-family: var(--serif); stroke: rgba(255, 255, 255, 0.45); stroke-width: 0.7px; paint-order: stroke; }
 .graph-card .axis { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
 .graph-card .bar-value, .graph-card .bar-name { fill: #ffffff; }
 .graph-card .pie-label { font-weight: 700; fill: #ffffff; stroke: #07122e; stroke-width: 3px; paint-order: stroke; }

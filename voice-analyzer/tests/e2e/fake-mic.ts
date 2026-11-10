@@ -14,7 +14,8 @@ export function installFakeMic(): void {
   function ensure() {
     if (state) return state;
     const ctx = new AudioContext();
-    const n = 10;
+    // 40 harmonics of 200 Hz reach 8 kHz, so every colour band of the result graphs gets some energy.
+    const n = 40;
     const real = new Float32Array(n + 1);
     const imag = new Float32Array(n + 1);
     for (let k = 1; k <= n; k++) imag[k] = 1 / k;

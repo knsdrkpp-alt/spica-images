@@ -91,14 +91,42 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await expect(page.locator('h2.headline')).toContainText('参考', { timeout: 30_000 });
   expect(await sawAnalyzing(page)).toBe(true);
   expect(await mic(page)).toEqual({ opens: 1, stops: 1 }); // the mic is closed on the result screen
-  await expect(page.locator('svg.chart-bar rect.bar')).toHaveCount(12);
-  await expect(page.locator('svg.chart-pie path')).toHaveCount(12);
+  await expect(page.locator('.graph-card svg.chart-bar rect.bar')).toHaveCount(6);
+  await expect(page.locator('.graph-card svg.chart-pie path')).toHaveCount(6);
+  await expect(page.locator('.graph-card svg.chart-polar g.ring')).toHaveCount(2);
+  await expect(page.locator('.graph-card svg.chart-polar text.share-number')).toHaveCount(6);
+  await expect(page.getByText(/^強い順:/)).toBeVisible();
+  // The six numbers sit inside the circle card (not clipped by the viewBox).
+  const clipped = await page.evaluate(() => {
+    const svg = document.querySelector('svg.chart-polar')!;
+    const box = svg.getBoundingClientRect();
+    return [...svg.querySelectorAll('text.share-number')].some((t) => {
+      const r = t.getBoundingClientRect();
+      return r.left < box.left || r.right > box.right || r.top < box.top || r.bottom > box.bottom;
+    });
+  });
+  expect(clipped).toBe(false);
   await expect(page.getByText('医療機関(耳鼻咽喉科)に相談してください')).toBeVisible();
   await expect(page.getByText('測った値')).toBeVisible();
   await expect(page.getByText(/声の高さ:約 \d+ Hz/)).toBeVisible();
   await expect(page.getByText('週3〜5日、2〜4週ほど続けてから')).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('result.png'), fullPage: true });
+
+  // 12 colours, then back; the inner ring checkbox hides only the inner ring.
+  await page.getByRole('button', { name: '12色' }).click();
+  await expect(page.getByRole('button', { name: '12色' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.graph-card svg.chart-bar rect.bar')).toHaveCount(12);
+  await expect(page.locator('.graph-card svg.chart-pie path')).toHaveCount(12);
+  await expect(page.locator('.graph-card svg.chart-polar text.share-number')).toHaveCount(12);
+  expect(await noHScroll(page)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('result-12.png'), fullPage: true });
+  await page.getByLabel('内側:「あー」').uncheck();
+  await expect(page.locator('svg.chart-polar g.ring-inner')).toHaveCount(0);
+  await expect(page.locator('svg.chart-polar g.ring-outer')).toHaveCount(1);
+  await page.getByRole('button', { name: '6色' }).click();
+  await expect(page.locator('.graph-card svg.chart-bar rect.bar')).toHaveCount(6);
+  await expect(page.locator('svg.chart-polar g.ring-inner')).toHaveCount(0);
 
   expect(net.count()).toBeGreaterThan(0);
   expect(net.violations()).toEqual([]);
