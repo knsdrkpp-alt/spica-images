@@ -84,6 +84,8 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await expect(page.getByRole('button', { name: '声を録音する' })).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('start.png'), fullPage: true });
+  await expect(page.getByText('入力した日付は、端末の外に送らず、保存もしません。')).toBeVisible();
+  await page.getByLabel('生年月日(入力は任意)').fill('1990-05-12'); // life path number 9
 
   await page.getByRole('button', { name: '声を録音する' }).click();
   await recordSet(page);
@@ -112,6 +114,17 @@ test('full flow, no network traffic beyond GET of own origin, 360px layout', asy
   await expect(page.getByText('週3〜5日、2〜4週ほど続けてから')).toBeVisible();
   expect(await noHScroll(page)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('result.png'), fullPage: true });
+
+  // 声と数のあいだ: the optional card for the birth date typed on the start screen.
+  const card = page.getByRole('region', { name: /声と数のあいだ/ });
+  await expect(card).toBeVisible();
+  await expect(card.getByText('娯楽・自己理解のための読み物です。科学的な根拠は確認されていません。')).toBeVisible();
+  await expect(card.locator('.reading-num')).toHaveText('9');
+  await expect(card.getByText('いちばん強かった帯:')).toBeVisible();
+  await expect(card.locator('ol > li')).toHaveCount(3);
+  expect(await noHScroll(page)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('result-reading.png'), fullPage: true });
+  expect(await page.evaluate(() => localStorage.length + sessionStorage.length + document.cookie.length)).toBe(0);
 
   // 12 colours, then back; the inner ring checkbox hides only the inner ring.
   await page.getByRole('button', { name: '12色' }).click();
@@ -143,6 +156,7 @@ test('three sets drop the 参考 label and the extra-set button', async ({ page 
   }
   expect(await mic(page)).toEqual({ opens: 3, stops: 3 });
   await expect(page.getByText('より安定した結果')).toBeVisible();
+  await expect(page.getByText('声と数のあいだ')).toHaveCount(0); // no birth date given: no reading at all
   await expect(page.locator('h2.headline')).not.toContainText('参考');
   await expect(page.getByRole('button', { name: 'もう1セット録音する' })).toHaveCount(0);
   await page.getByRole('button', { name: '最初にもどる' }).click();
